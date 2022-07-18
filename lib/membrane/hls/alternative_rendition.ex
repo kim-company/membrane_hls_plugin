@@ -4,21 +4,21 @@ defmodule Membrane.HLS.AlternativeRendition do
 
   @type type_t :: :subtitles | :audio | :video | :cc
   @type t :: %__MODULE__{
-    attributes: Tag.attribute_list_t(),
-    type: type_t(),
-    group_id: String.t()
-  }
+          attributes: Tag.attribute_list_t(),
+          type: type_t(),
+          group_id: String.t()
+        }
   defstruct [:type, :group_id, attributes: %{}]
 
   def from_tag(%Tag{id: id, attributes: attrs}) do
     if id != Tag.AlternativeRendition.id() do
-      raise ArgumentError, "Cannot convert tag #{inspect id} to a alternative rendition instance"
+      raise ArgumentError, "Cannot convert tag #{inspect(id)} to a alternative rendition instance"
     end
 
     %__MODULE__{
       attributes: attrs,
       type: attrs.type,
-      group_id: attrs.group_id,
+      group_id: attrs.group_id
     }
   end
 end

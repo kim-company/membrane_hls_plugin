@@ -52,8 +52,8 @@ defmodule Membrane.HLS.Playlist.Tag do
 
   defmacro __using__(id: tag_id) do
     quote do
-      @behaviour Membrane.HLS.Playlist.Tag 
-      alias Membrane.HLS.Playlist.Tag 
+      @behaviour Membrane.HLS.Playlist.Tag
+      alias Membrane.HLS.Playlist.Tag
 
       @impl true
       def id(), do: unquote(tag_id)
@@ -89,7 +89,11 @@ defmodule Membrane.HLS.Playlist.Tag do
     |> then(&Enum.join(["#", &1]))
   end
 
-  @spec capture_attribute_list!(String.t(), tag_id_t(), (String.t(), String.t() -> :skip | {atom(), any})) :: %{required(atom()) => any}
+  @spec capture_attribute_list!(
+          String.t(),
+          tag_id_t(),
+          (String.t(), String.t() -> :skip | {atom(), any})
+        ) :: %{required(atom()) => any}
   def capture_attribute_list!(data, tag_id, field_parser_fun) do
     marshaled_tag_id = marshal_id(tag_id)
     regex = Regex.compile!("#{marshaled_tag_id}:(?<target>.*)")
@@ -97,7 +101,7 @@ defmodule Membrane.HLS.Playlist.Tag do
 
     attribute_list_raw
     |> parse_attribute_list()
-    |> Enum.reduce(%{}, fn {key, value}, acc -> 
+    |> Enum.reduce(%{}, fn {key, value}, acc ->
       case field_parser_fun.(key, value) do
         :skip -> acc
         {key, value} -> Map.put_new(acc, key, value)
@@ -118,6 +122,7 @@ defmodule Membrane.HLS.Playlist.Tag do
     # - val: parsing value
     # - qval: parsing quoted value
     state = {:key, buf, %{}}
+
     put_key_val = fn {keybuf, valbuf}, acc ->
       key = keybuf |> Enum.reverse() |> Enum.join()
       val = valbuf |> Enum.reverse() |> Enum.join()
@@ -128,13 +133,23 @@ defmodule Membrane.HLS.Playlist.Tag do
       data
       |> String.codepoints()
       |> Enum.reduce(state, fn
-        "=", {:key, buf, acc} -> {:val, buf, acc}
-        cp, {:key, {keybuf, valbuf}, acc} -> {:key, {[cp | keybuf], valbuf}, acc}
-        "\"", {:val, buf, acc} -> {:qval, buf, acc}
-        "\"", {:qval, buf, acc} -> {:val, buf, acc}
+        "=", {:key, buf, acc} ->
+          {:val, buf, acc}
+
+        cp, {:key, {keybuf, valbuf}, acc} ->
+          {:key, {[cp | keybuf], valbuf}, acc}
+
+        "\"", {:val, buf, acc} ->
+          {:qval, buf, acc}
+
+        "\"", {:qval, buf, acc} ->
+          {:val, buf, acc}
+
         ",", {:val, buf, acc} ->
           {:key, {[], []}, put_key_val.(buf, acc)}
-        cp, {state, {keybuf, valbuf}, acc} when state in [:val, :qval] -> {state, {keybuf, [cp | valbuf]}, acc}
+
+        cp, {state, {keybuf, valbuf}, acc} when state in [:val, :qval] ->
+          {state, {keybuf, [cp | valbuf]}, acc}
       end)
 
     # Last holded value is still in the buffer at this point
