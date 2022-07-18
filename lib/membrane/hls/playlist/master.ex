@@ -2,7 +2,7 @@ defmodule Membrane.HLS.Playlist.Master do
   alias Membrane.HLS.VariantStream
   alias Membrane.HLS.AlternativeRendition
   alias Membrane.HLS.Playlist
-  alias Membrane.HLS.Playlist.Tags
+  alias Membrane.HLS.Playlist.Tag
 
   @type t :: %__MODULE__{tags: Playlist.tag_map_t(), version: pos_integer(), streams: VariantStream.t()}
   defstruct [:version, tags: %{}, streams: []]
@@ -10,16 +10,16 @@ defmodule Membrane.HLS.Playlist.Master do
 
   @impl true
   def init(tags) do
-    [version] = Map.fetch!(tags, Tags.Version.id())
+    [version] = Map.fetch!(tags, Tag.Version.id())
 
     renditions =
       tags
-      |> Map.get(Tags.AlternativeRendition.id(), [])
+      |> Map.get(Tag.AlternativeRendition.id(), [])
       |> Enum.map(&AlternativeRendition.from_tag(&1))
 
     streams =
       tags
-      |> Map.get(Tags.VariantStream.id(), [])
+      |> Map.get(Tag.VariantStream.id(), [])
       |> Enum.map(&VariantStream.from_tag(&1))
       |> Enum.map(&VariantStream.maybe_associate_alternative_rendition(&1, renditions))
 
@@ -29,9 +29,9 @@ defmodule Membrane.HLS.Playlist.Master do
   @impl true
   def supported_tags() do
     [
-      Tags.Version,
-      Tags.VariantStream,
-      Tags.AlternativeRendition,
+      Tag.Version,
+      Tag.VariantStream,
+      Tag.AlternativeRendition,
     ]
   end
 

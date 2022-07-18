@@ -1,4 +1,4 @@
-defmodule Membrane.HLS.Playlist.Tags.VariantStream do
+defmodule Membrane.HLS.Playlist.Tag.VariantStream do
   use Membrane.HLS.Playlist.Tag, id: :ext_x_stream_inf
 
   @impl true

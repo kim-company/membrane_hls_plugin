@@ -1,4 +1,4 @@
-defmodule Membrane.HLS.Playlist.Tags.AlternativeRendition do
+defmodule Membrane.HLS.Playlist.Tag.AlternativeRendition do
   use Membrane.HLS.Playlist.Tag, id: :ext_x_media
 
   @impl true

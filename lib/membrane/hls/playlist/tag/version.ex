@@ -1,4 +1,4 @@
-defmodule Membrane.HLS.Playlist.Tags.Version do
+defmodule Membrane.HLS.Playlist.Tag.Version do
   use Membrane.HLS.Playlist.Tag, id: :ext_x_version
 
   @impl true

@@ -1,5 +1,5 @@
 defmodule Membrane.HLS.AlternativeRendition do
-  alias Membrane.HLS.Playlist.Tags
+  alias Membrane.HLS.Playlist.Tag
   alias Membrane.HLS.Playlist.Tag
 
   @type type_t :: :subtitles | :audio | :video | :cc
@@ -11,7 +11,7 @@ defmodule Membrane.HLS.AlternativeRendition do
   defstruct [:type, :group_id, attributes: %{}]
 
   def from_tag(%Tag{id: id, attributes: attrs}) do
-    if id != Tags.AlternativeRendition.id() do
+    if id != Tag.AlternativeRendition.id() do
       raise ArgumentError, "Cannot convert tag #{inspect id} to a alternative rendition instance"
     end
 

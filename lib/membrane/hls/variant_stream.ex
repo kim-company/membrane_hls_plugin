@@ -1,6 +1,6 @@
 defmodule Membrane.HLS.VariantStream do
   alias Membrane.HLS.Playlist.Tag
-  alias Membrane.HLS.Playlist.Tags
+  alias Membrane.HLS.Playlist.Tag
   alias Membrane.HLS.AlternativeRendition
 
   @type t :: %__MODULE__{
@@ -10,7 +10,7 @@ defmodule Membrane.HLS.VariantStream do
   defstruct [attributes: %{}, alternatives: %{}]
 
   def from_tag(%Tag{id: id, attributes: attrs}) do
-    if id != Tags.VariantStream.id() do
+    if id != Tag.VariantStream.id() do
       raise ArgumentError, "Cannot convert tag #{inspect id} to a variant stream instance"
     end
 
