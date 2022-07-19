@@ -17,7 +17,16 @@ defmodule Membrane.HLS.VariantStream do
           alternatives: %{required(AlternativeRendition.type_t()) => [AlternativeRendition.t()]}
         }
   @enforce_keys [:uri, :bandwidth, :codecs]
-  @optional_keys [:average_bandwidth, :resolution, :frame_rate, :audio, :video, :subtitles, :closed_captions, hdcp_level: :none]
+  @optional_keys [
+    :average_bandwidth,
+    :resolution,
+    :frame_rate,
+    :audio,
+    :video,
+    :subtitles,
+    :closed_captions,
+    hdcp_level: :none
+  ]
   defstruct @enforce_keys ++ @optional_keys ++ [alternatives: %{}]
 
   def from_tag(%Tag{id: id, attributes: attrs}) do

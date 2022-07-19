@@ -14,11 +14,21 @@ defmodule Membrane.HLS.AlternativeRendition do
           default: boolean(),
           instream_id: String.t(),
           channels: String.t(),
-          characteristics: String.t(),
+          characteristics: String.t()
         }
 
-  @enforce_keys [:type, :group_id, :name ]
-  @optional_keys [:uri, :language, :assoc_language, :autoselect, :default, :forced, :instream_id, :channels, :characteristics]
+  @enforce_keys [:type, :group_id, :name]
+  @optional_keys [
+    :uri,
+    :language,
+    :assoc_language,
+    :autoselect,
+    :default,
+    :forced,
+    :instream_id,
+    :channels,
+    :characteristics
+  ]
 
   defstruct @enforce_keys ++ @optional_keys ++ [attributes: %{}]
 

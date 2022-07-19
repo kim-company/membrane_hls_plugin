@@ -1,8 +1,12 @@
 defmodule Membrane.HLS.Playlist.Tag do
-
   @type group_id_t :: String.t()
 
-  @type tag_class_t :: :media_segment | :media_playlist | :master_playlist | :playlist | :master_or_media_playlist
+  @type tag_class_t ::
+          :media_segment
+          | :media_playlist
+          | :master_playlist
+          | :playlist
+          | :master_or_media_playlist
 
   # appear in both master and media playlists
   @type tag_id_t ::
@@ -85,7 +89,7 @@ defmodule Membrane.HLS.Playlist.Tag do
           id: id(),
           class: Tag.class_from_id(id()),
           sequence: sequence,
-          attributes: attribute_list,
+          attributes: attribute_list
         }
       end
 
@@ -94,7 +98,7 @@ defmodule Membrane.HLS.Playlist.Tag do
           id: id(),
           class: Tag.class_from_id(id()),
           sequence: sequence,
-          value: value,
+          value: value
         }
       end
 

@@ -63,7 +63,7 @@ defmodule Membrane.HLS.PlaylistTest do
         frame_rate: 30.0
       ]
       |> Enum.each(fn {key, val} ->
-        assert Map.get(stream, key) == val, "expected #{inspect val} on key #{inspect key}"
+        assert Map.get(stream, key) == val, "expected #{inspect(val)} on key #{inspect(key)}"
       end)
     end
 
@@ -114,7 +114,7 @@ defmodule Membrane.HLS.PlaylistTest do
         }
       ]
       |> Enum.each(fn {key, val} ->
-        assert Map.get(rendition, key) == val, "expected #{inspect val} on key #{inspect key}"
+        assert Map.get(rendition, key) == val, "expected #{inspect(val)} on key #{inspect(key)}"
       end)
     end
   end
@@ -206,7 +206,9 @@ defmodule Membrane.HLS.PlaylistTest do
       last = List.last(Media.segments(manifest))
       assert last.duration == 2.020136054
       assert last.uri.path == "a/stream_1280x720_3300k/00000/stream_1280x720_3300k_00522.ts"
-      assert last.uri.query == "t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTc5MTYzMDEsImlhdCI6MTY1Nzg3MzEwMSwiaXNzIjoiY2RwIiwic3ViIjoiNmhReUhyUGRhRTNuL2Evc3RyZWFtXzEyODB4NzIwXzMzMDBrIiwidXNlcl9pZCI6IjMwNiIsInZpc2l0b3JfaWQiOiJiMGMyMGVkZS0wNDE2LTExZWQtYTYyMS0wYTU4YTlmZWFjMDIifQ.Fj7CADyZeoWtpaqiZLPodNHMWhlGeKjxLwpMR7lygqk"
+
+      assert last.uri.query ==
+               "t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTc5MTYzMDEsImlhdCI6MTY1Nzg3MzEwMSwiaXNzIjoiY2RwIiwic3ViIjoiNmhReUhyUGRhRTNuL2Evc3RyZWFtXzEyODB4NzIwXzMzMDBrIiwidXNlcl9pZCI6IjMwNiIsInZpc2l0b3JfaWQiOiJiMGMyMGVkZS0wNDE2LTExZWQtYTYyMS0wYTU4YTlmZWFjMDIifQ.Fj7CADyZeoWtpaqiZLPodNHMWhlGeKjxLwpMR7lygqk"
     end
   end
 end

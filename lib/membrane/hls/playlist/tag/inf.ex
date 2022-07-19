@@ -6,12 +6,16 @@ defmodule Membrane.HLS.Playlist.Tag.Inf do
   use Membrane.HLS.Playlist.Tag, id: :extinf
 
   @impl true
-  def unmarshal(data), do: capture_value!(data, ~s/\\d+\\.?\\d*/, fn raw ->
-    raw = if String.contains?(raw, ".") do
-      raw
-    else
-      raw <> ".0"
-    end
-    String.to_float(raw)
-  end)
+  def unmarshal(data),
+    do:
+      capture_value!(data, ~s/\\d+\\.?\\d*/, fn raw ->
+        raw =
+          if String.contains?(raw, ".") do
+            raw
+          else
+            raw <> ".0"
+          end
+
+        String.to_float(raw)
+      end)
 end

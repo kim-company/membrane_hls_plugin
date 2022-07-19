@@ -23,7 +23,7 @@ defmodule Membrane.HLS.Playlist.Tag.SegmentURI do
       id: id(),
       class: :media_segment,
       value: uri,
-      sequence: sequence,
+      sequence: sequence
     }
   end
 end

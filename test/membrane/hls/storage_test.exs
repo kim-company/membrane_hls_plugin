@@ -46,6 +46,7 @@ defmodule Membrane.HLS.StorageTest do
               assert {:ok, _data} = Storage.get_segment(@store, segment.uri)
               seen + 1
             end)
+
           segments_seen + seen
         end)
 

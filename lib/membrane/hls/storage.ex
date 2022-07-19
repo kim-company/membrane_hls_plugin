@@ -26,7 +26,7 @@ defmodule Membrane.HLS.Storage do
   def new(%adapter{} = config) do
     %__MODULE__{
       adapter: adapter,
-      state: adapter.init(config),
+      state: adapter.init(config)
     }
   end
 

@@ -5,25 +5,34 @@ defmodule Membrane.HLS.Playlist.Media do
   @behaviour Membrane.HLS.Playlist
 
   @type t :: %__MODULE__{
-    tags: Playlist.tag_map_t(),
-    version: pos_integer(),
-    target_segment_duration: pos_integer(),
-    media_sequence_number: pos_integer(),
-    finished: boolean(),
-    segments: [Segment.t()]
-  }
+          tags: Playlist.tag_map_t(),
+          version: pos_integer(),
+          target_segment_duration: pos_integer(),
+          media_sequence_number: pos_integer(),
+          finished: boolean(),
+          segments: [Segment.t()]
+        }
 
-  defstruct [:version, :target_segment_duration, :media_sequence_number, :finished, tags: %{}, segments: []]
+  defstruct [
+    :version,
+    :target_segment_duration,
+    :media_sequence_number,
+    :finished,
+    tags: %{},
+    segments: []
+  ]
 
   @impl true
   def init(tags) do
     [version] = Map.fetch!(tags, Tag.Version.id())
     [segment_duration] = Map.fetch!(tags, Tag.TargetSegmentDuration.id())
     [sequence_number] = Map.fetch!(tags, Tag.MediaSequenceNumber.id())
-    finished = case Map.get(tags, Tag.EndList.id()) do
-      nil -> false
-      [endlist] -> endlist.value
-    end
+
+    finished =
+      case Map.get(tags, Tag.EndList.id()) do
+        nil -> false
+        [endlist] -> endlist.value
+      end
 
     segments =
       tags
@@ -42,7 +51,7 @@ defmodule Membrane.HLS.Playlist.Media do
       target_segment_duration: segment_duration.value,
       media_sequence_number: sequence_number.value,
       finished: finished,
-      segments: segments,
+      segments: segments
     }
   end
 
@@ -54,7 +63,7 @@ defmodule Membrane.HLS.Playlist.Media do
       Tag.MediaSequenceNumber,
       Tag.EndList,
       Tag.Inf,
-      Tag.SegmentURI,
+      Tag.SegmentURI
     ]
   end
 

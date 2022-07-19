@@ -100,6 +100,7 @@ defmodule Membrane.HLS.TrackerTest do
 
       :ok = Tracker.stop(pid)
     end
+
     #
     test "sends start of track message identifing first sequence number" do
       {:ok, pid} = Tracker.start_link(@store)
@@ -109,7 +110,7 @@ defmodule Membrane.HLS.TrackerTest do
 
       :ok = Tracker.stop(pid)
     end
- 
+
     test "sends track termination message when track is finished" do
       {:ok, pid} = Tracker.start_link(@store)
       ref = Tracker.follow(pid, {URI.parse("stream_416x234.m3u8"), %{}})
