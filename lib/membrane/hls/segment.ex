@@ -1,15 +1,15 @@
 defmodule Membrane.HLS.Segment do
   alias Membrane.HLS.Playlist.Tag
 
-  @enforce_keys [:uri, :duration]
+  @enforce_keys [:uri, :duration, :relative_sequence]
   @type t :: %__MODULE__{
     uri: URI.t(),
     duration: float(),
+    relative_sequence: pos_integer(),
+    absolute_sequence: pos_integer(),
   }
 
-  defstruct @enforce_keys ++ [
-    relative_sequence: 0,
-  ]
+  defstruct @enforce_keys ++ [:absolute_sequence]
 
   @spec from_tags([Tag.t()]) :: t()
   def from_tags(tags) do
@@ -31,5 +31,10 @@ defmodule Membrane.HLS.Segment do
       duration: duration.value,
       relative_sequence: sequence,
     }
+  end
+
+  @spec update_absolute_sequence(t, pos_integer()) :: t
+  def update_absolute_sequence(segment, media_sequence) do
+    %__MODULE__{segment | absolute_sequence: media_sequence + segment.relative_sequence}
   end
 end
