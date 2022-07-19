@@ -2,7 +2,7 @@ defmodule Membrane.HLS.PlaylistTest do
   use ExUnit.Case
 
   alias Membrane.HLS.Playlist
-  alias Membrane.HLS.Playlist.Master
+  alias Membrane.HLS.Playlist.{Master, Media}
   alias Membrane.HLS.VariantStream
   alias Membrane.HLS.AlternativeRendition
 
@@ -116,6 +116,97 @@ defmodule Membrane.HLS.PlaylistTest do
       |> Enum.each(fn {key, val} ->
         assert Map.get(rendition.attributes, key, val) == val
       end)
+    end
+  end
+
+  describe "Unmarshal Media Playlist" do
+    test "fails with empty content" do
+      [
+        fn -> Playlist.unmarshal("", Media) end,
+        fn -> Playlist.unmarshal("some invalid content", Media) end
+      ]
+      |> Enum.each(fn t -> assert_raise ArgumentError, t end)
+    end
+
+    test "collects manifest header" do
+      version = 3
+      duration = 7
+      sequence = 662
+
+      content = """
+      #EXTM3U
+      #EXT-X-VERSION:#{version}
+      #EXT-X-TARGETDURATION:#{duration}
+      #EXT-X-MEDIA-SEQUENCE:#{sequence}
+      #EXTINF:6.00000,
+      a/stream_1280x720/00000/stream_1280x720_00662.ts?t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTgwMjYwMjIsImlhdCI6MTY1Nzk2NzgyMiwiaXNzIjoiY2RwIiwic3ViIjoiZzM5azZLSjNLZ1UwL2Evc3RyZWFtXzEyODB4NzIwIiwidXNlcl9pZCI6IjEiLCJ2aXNpdG9yX2lkIjoiM2FhNjY1MGEtMDRmMy0xMWVkLWIzOGYtMGE1OGE5ZmVhYzAyIn0.DNMBbZPLE0yc0GnGjV5hG_eX_uQ5hzriLk0ZPe8w2AI
+      #EXTINF:6.00000,
+      a/stream_1280x720/00000/stream_1280x720_00663.ts?t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTgwMjYwMjIsImlhdCI6MTY1Nzk2NzgyMiwiaXNzIjoiY2RwIiwic3ViIjoiZzM5azZLSjNLZ1UwL2Evc3RyZWFtXzEyODB4NzIwIiwidXNlcl9pZCI6IjEiLCJ2aXNpdG9yX2lkIjoiM2FhNjY1MGEtMDRmMy0xMWVkLWIzOGYtMGE1OGE5ZmVhYzAyIn0.DNMBbZPLE0yc0GnGjV5hG_eX_uQ5hzriLk0ZPe8w2AI
+      """
+
+      manifest = Playlist.unmarshal(content, Media)
+      assert manifest.version == version
+      assert manifest.target_segment_duration == duration
+      assert manifest.media_sequence_number == sequence
+      refute manifest.finished
+    end
+
+    test "collects segments" do
+      content = """
+      #EXTM3U
+      #EXT-X-VERSION:7
+      #EXT-X-TARGETDURATION:3
+      #EXT-X-MEDIA-SEQUENCE:0
+      #EXTINF:2.020136054,
+      audio_segment_0_audio_track.m4s
+      #EXTINF:2.020136054,
+      audio_segment_1_audio_track.m4s
+      #EXTINF:2.020136054,
+      audio_segment_2_audio_track.m4s
+      #EXTINF:2.020136054,
+      audio_segment_3_audio_track.m4s
+      #EXTINF:1.95047619,
+      audio_segment_4_audio_track.m4s
+      """
+
+      manifest = Playlist.unmarshal(content, Media)
+      assert Enum.count(Media.segments(manifest)) == 5
+    end
+
+    test "detects when track is finished" do
+      content = """
+      #EXTM3U
+      #EXT-X-VERSION:7
+      #EXT-X-TARGETDURATION:10
+      #EXT-X-MEDIA-SEQUENCE:0
+      #EXTINF:10.0,
+      video_segment_0_video_track.ts
+      #EXTINF:2.0,
+      video_segment_1_video_track.ts
+      #EXT-X-ENDLIST
+      """
+
+      manifest = Playlist.unmarshal(content, Media)
+      assert manifest.finished
+    end
+
+    test "collects segment tags" do
+      content = """
+      #EXTM3U
+      #EXT-X-VERSION:7
+      #EXT-X-TARGETDURATION:10
+      #EXT-X-MEDIA-SEQUENCE:0
+      #EXTINF:9.56,
+      video_segment_0_video_track.ts
+      #EXTINF:2.020136054,
+      a/stream_1280x720_3300k/00000/stream_1280x720_3300k_00522.ts?t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTc5MTYzMDEsImlhdCI6MTY1Nzg3MzEwMSwiaXNzIjoiY2RwIiwic3ViIjoiNmhReUhyUGRhRTNuL2Evc3RyZWFtXzEyODB4NzIwXzMzMDBrIiwidXNlcl9pZCI6IjMwNiIsInZpc2l0b3JfaWQiOiJiMGMyMGVkZS0wNDE2LTExZWQtYTYyMS0wYTU4YTlmZWFjMDIifQ.Fj7CADyZeoWtpaqiZLPodNHMWhlGeKjxLwpMR7lygqk
+      """
+
+      manifest = Playlist.unmarshal(content, Media)
+      last = List.last(Media.segments(manifest))
+      assert last.duration == 2.020136054
+      assert last.uri.path == "a/stream_1280x720_3300k/00000/stream_1280x720_3300k_00522.ts"
+      assert last.uri.query == "t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTc5MTYzMDEsImlhdCI6MTY1Nzg3MzEwMSwiaXNzIjoiY2RwIiwic3ViIjoiNmhReUhyUGRhRTNuL2Evc3RyZWFtXzEyODB4NzIwXzMzMDBrIiwidXNlcl9pZCI6IjMwNiIsInZpc2l0b3JfaWQiOiJiMGMyMGVkZS0wNDE2LTExZWQtYTYyMS0wYTU4YTlmZWFjMDIifQ.Fj7CADyZeoWtpaqiZLPodNHMWhlGeKjxLwpMR7lygqk"
     end
   end
 end

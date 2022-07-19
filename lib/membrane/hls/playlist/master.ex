@@ -4,13 +4,14 @@ defmodule Membrane.HLS.Playlist.Master do
   alias Membrane.HLS.Playlist
   alias Membrane.HLS.Playlist.Tag
 
+  @behaviour Membrane.HLS.Playlist
+
   @type t :: %__MODULE__{
           tags: Playlist.tag_map_t(),
           version: pos_integer(),
           streams: VariantStream.t()
         }
   defstruct [:version, tags: %{}, streams: []]
-  @behaviour Membrane.HLS.Playlist
 
   @impl true
   def init(tags) do

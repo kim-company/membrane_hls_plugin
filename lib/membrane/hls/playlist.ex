@@ -5,7 +5,7 @@ defmodule Membrane.HLS.Playlist do
 
   alias Membrane.HLS.Playlist.Tag
 
-  @type tag_map_t :: %{required(Tag.tag_id_t()) => [Tag.t()]}
+  @type tag_map_t :: %{required(Tag.tag_id_t() | {pos_integer(), :segment}) => [Tag.t()]}
 
   @doc """
   Returns a list of modules implementing the tag behaviour that are used to
@@ -21,12 +21,19 @@ defmodule Membrane.HLS.Playlist do
   def unmarshal(data = "#EXTM3U" <> _rest, playlist_impl) do
     unmarshalers = playlist_impl.supported_tags()
 
+    init_tag = fn module, data, sequence ->
+      value_or_attrs = module.unmarshal(data)
+      tag = module.init(value_or_attrs, sequence)
+      n = if module.has_uri?(), do: sequence + 1, else: sequence
+      {tag, n}
+    end
+
     data
     # carriage return + line feed should be supported as well, see RFC
     # 8216, 4.1
     |> String.split("\n", trim: true)
-    |> Enum.reduce({[], nil}, fn
-      line, acc = {marshaled, nil} ->
+    |> Enum.reduce({[], 0, nil}, fn
+      line, acc = {marshaled, n, nil} ->
         matching_unmarshaler =
           Enum.find(unmarshalers, fn unmarshaler ->
             unmarshaler.match?(line)
@@ -37,17 +44,25 @@ defmodule Membrane.HLS.Playlist do
           acc
         else
           if matching_unmarshaler.is_multiline?() do
-            {marshaled, {matching_unmarshaler, line}}
+            {marshaled, n, {matching_unmarshaler, line}}
           else
-            {[matching_unmarshaler.unmarshal(line) | marshaled], nil}
+            {tag, n} = init_tag.(matching_unmarshaler, line, n)
+            {[tag | marshaled], n, nil}
           end
         end
 
-      line, {marshaled, {matching_unmarshaler, old_line}} ->
-        {[matching_unmarshaler.unmarshal([old_line, line]) | marshaled], nil}
+      line, {marshaled, n, {matching_unmarshaler, old_line}} ->
+        {tag, n} = init_tag.(matching_unmarshaler, [old_line, line], n)
+        {[tag | marshaled], n, nil}
     end)
     |> elem(0)
-    |> Enum.group_by(fn tag -> tag.id end)
+    |> Enum.group_by(fn tag ->
+      if tag.class == :media_segment do
+        {tag.sequence, :segment}
+      else
+        tag.id
+      end
+    end)
     |> playlist_impl.init()
   end
 

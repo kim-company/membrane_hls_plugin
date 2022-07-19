@@ -1,4 +1,7 @@
 defmodule Membrane.HLS.Playlist.Tag do
+
+  @type tag_class_t :: :media_segment | :media_playlist | :master_playlist | :playlist | :master_or_media_playlist
+
   # appear in both master and media playlists
   @type tag_id_t ::
           :ext_m3u
@@ -36,6 +39,8 @@ defmodule Membrane.HLS.Playlist.Tag do
 
   @type t :: %__MODULE__{
           id: tag_id_t,
+          class: tag_class_t(),
+          sequence: pos_integer(),
           value: any(),
           attributes: attribute_list_t
         }
@@ -43,12 +48,14 @@ defmodule Membrane.HLS.Playlist.Tag do
   @type behaviour_t :: module()
 
   @callback match?(String.t()) :: boolean()
-  @callback unmarshal(String.t() | [String.t()]) :: t()
+  @callback unmarshal(String.t() | [String.t()]) :: attribute_list_t() | any()
+  @callback init(attribute_list_t() | any(), pos_integer()) :: t()
   @callback is_multiline?() :: boolean()
   @callback id() :: tag_id_t()
+  @callback has_uri?() :: boolean()
 
-  @enforce_keys [:id]
-  defstruct @enforce_keys ++ [:value, attributes: []]
+  @enforce_keys [:id, :class]
+  defstruct @enforce_keys ++ [:value, sequence: 0, attributes: []]
 
   defmacro __using__(id: tag_id) do
     quote do
@@ -63,17 +70,39 @@ defmodule Membrane.HLS.Playlist.Tag do
 
       @impl true
       def match?(line) do
-        prefix = Membrane.HLS.Playlist.Tag.marshal_id(unquote(tag_id))
+        prefix = Tag.marshal_id(unquote(tag_id))
         String.starts_with?(line, prefix)
+      end
+
+      @impl true
+      def has_uri?(), do: false
+
+      @impl true
+      def init(attribute_list, sequence) when is_map(attribute_list) do
+        %Tag{
+          id: id(),
+          class: Tag.class_from_id(id()),
+          sequence: sequence,
+          attributes: attribute_list,
+        }
+      end
+
+      def init(value, sequence) do
+        %Tag{
+          id: id(),
+          class: Tag.class_from_id(id()),
+          sequence: sequence,
+          value: value,
+        }
       end
 
       @spec capture_value!(String.t(), String.t(), (String.t() -> any)) :: any
       def capture_value!(data, match_pattern, parser_fun) do
-        Membrane.HLS.Playlist.Tag.capture_value!(data, unquote(tag_id), match_pattern, parser_fun)
+        Tag.capture_value!(data, unquote(tag_id), match_pattern, parser_fun)
       end
 
       def capture_attribute_list!(data, field_parser_fun) do
-        Membrane.HLS.Playlist.Tag.capture_attribute_list!(data, unquote(tag_id), field_parser_fun)
+        Tag.capture_attribute_list!(data, unquote(tag_id), field_parser_fun)
       end
 
       defoverridable Membrane.HLS.Playlist.Tag
@@ -164,4 +193,32 @@ defmodule Membrane.HLS.Playlist.Tag do
 
     parser_fun.(raw)
   end
+
+  @spec class_from_id(tag_id_t) :: tag_class_t()
+  def class_from_id(:ext_m3u), do: :playlist
+  def class_from_id(:ext_x_version), do: :playlist
+
+  def class_from_id(:extinf), do: :media_segment
+  def class_from_id(:ext_x_byterange), do: :media_segment
+  def class_from_id(:ext_x_discontinuity), do: :media_segment
+  def class_from_id(:ext_x_key), do: :media_segment
+  def class_from_id(:ext_x_map), do: :media_segment
+  def class_from_id(:ext_x_program_date_time), do: :media_segment
+  def class_from_id(:ext_x_daterange), do: :media_segment
+
+  def class_from_id(:ext_x_targetduration), do: :media_playlist
+  def class_from_id(:ext_x_media_sequence), do: :media_playlist
+  def class_from_id(:ext_x_discontinuity_sequence), do: :media_playlist
+  def class_from_id(:ext_x_endlist), do: :media_playlist
+  def class_from_id(:ext_x_playlist_type), do: :media_playlist
+  def class_from_id(:ext_x_i_frames_only), do: :media_playlist
+
+  def class_from_id(:ext_x_media), do: :master_playlist
+  def class_from_id(:ext_x_stream_inf), do: :master_playlist
+  def class_from_id(:ext_x_i_frame_stream_inf), do: :master_playlist
+  def class_from_id(:ext_x_session_data), do: :master_playlist
+  def class_from_id(:ext_x_session_key), do: :master_playlist
+
+  def class_from_id(:ext_x_independent_segments), do: :master_or_media_playlist
+  def class_from_id(:ext_x_start), do: :master_or_media_playlist
 end

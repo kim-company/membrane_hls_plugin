@@ -3,18 +3,15 @@ defmodule Membrane.HLS.Playlist.Tag.AlternativeRendition do
 
   @impl true
   def unmarshal(line) do
-    attrs =
-      line
-      |> capture_attribute_list!(fn
-        "TYPE", val -> {:type, rendition_type_to_atom(val)}
-        "URI", val -> {:uri, URI.parse(val)}
-        "GROUP-ID", val -> {:group_id, val}
-        "NAME", val -> {:name, val}
-        "LANGUAGE", val -> {:language, val}
-        _key, _val -> :skip
-      end)
-
-    %Tag{id: id(), attributes: attrs}
+    line
+    |> capture_attribute_list!(fn
+      "TYPE", val -> {:type, rendition_type_to_atom(val)}
+      "URI", val -> {:uri, URI.parse(val)}
+      "GROUP-ID", val -> {:group_id, val}
+      "NAME", val -> {:name, val}
+      "LANGUAGE", val -> {:language, val}
+      _key, _val -> :skip
+    end)
   end
 
   def rendition_type_to_atom("SUBTITLES"), do: :subtitles
