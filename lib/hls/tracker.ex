@@ -1,9 +1,9 @@
-defmodule Membrane.HLS.Tracker do
+defmodule HLS.Tracker do
   use GenServer
 
-  alias Membrane.HLS.Storage
-  alias Membrane.HLS.Playlist.Media
-  alias Membrane.HLS.Segment
+  alias HLS.Storage
+  alias HLS.Playlist.Media
+  alias HLS.Segment
 
   defstruct [:storage, following: %{}]
 

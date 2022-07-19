@@ -1,7 +1,7 @@
-defmodule Membrane.HLS.Storage do
-  alias Membrane.HLS.Playlist
-  alias Membrane.HLS.Playlist.Master
-  alias Membrane.HLS.Playlist.Media
+defmodule HLS.Storage do
+  alias HLS.Playlist
+  alias HLS.Playlist.Master
+  alias HLS.Playlist.Media
 
   @type config_t :: struct
   @type state_t :: any

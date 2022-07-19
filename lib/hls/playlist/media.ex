@@ -1,8 +1,8 @@
-defmodule Membrane.HLS.Playlist.Media do
-  alias Membrane.HLS.Playlist.Tag
-  alias Membrane.HLS.Segment
+defmodule HLS.Playlist.Media do
+  alias HLS.Playlist.Tag
+  alias HLS.Segment
 
-  @behaviour Membrane.HLS.Playlist
+  @behaviour HLS.Playlist
 
   @type t :: %__MODULE__{
           tags: Playlist.tag_map_t(),

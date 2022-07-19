@@ -1,6 +1,6 @@
-defmodule Membrane.HLS.VariantStream do
-  alias Membrane.HLS.Playlist.Tag
-  alias Membrane.HLS.AlternativeRendition
+defmodule HLS.VariantStream do
+  alias HLS.Playlist.Tag
+  alias HLS.AlternativeRendition
 
   @type t :: %__MODULE__{
           uri: URI.t(),

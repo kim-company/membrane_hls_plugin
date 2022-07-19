@@ -1,5 +1,5 @@
-defmodule Membrane.HLS.Segment do
-  alias Membrane.HLS.Playlist.Tag
+defmodule HLS.Segment do
+  alias HLS.Playlist.Tag
 
   @enforce_keys [:uri, :duration, :relative_sequence]
   @type t :: %__MODULE__{

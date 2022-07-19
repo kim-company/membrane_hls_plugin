@@ -1,5 +1,5 @@
-defmodule Membrane.HLS.AlternativeRendition do
-  alias Membrane.HLS.Playlist.Tag
+defmodule HLS.AlternativeRendition do
+  alias HLS.Playlist.Tag
 
   @type type_t :: :subtitles | :audio | :video | :cc
   @type t :: %__MODULE__{

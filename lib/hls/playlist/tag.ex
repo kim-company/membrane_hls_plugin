@@ -1,4 +1,4 @@
-defmodule Membrane.HLS.Playlist.Tag do
+defmodule HLS.Playlist.Tag do
   @type group_id_t :: String.t()
 
   @type tag_class_t ::
@@ -65,8 +65,8 @@ defmodule Membrane.HLS.Playlist.Tag do
 
   defmacro __using__(id: tag_id) do
     quote do
-      @behaviour Membrane.HLS.Playlist.Tag
-      alias Membrane.HLS.Playlist.Tag
+      @behaviour HLS.Playlist.Tag
+      alias HLS.Playlist.Tag
 
       @impl true
       def id(), do: unquote(tag_id)
@@ -111,7 +111,7 @@ defmodule Membrane.HLS.Playlist.Tag do
         Tag.capture_attribute_list!(data, unquote(tag_id), field_parser_fun)
       end
 
-      defoverridable Membrane.HLS.Playlist.Tag
+      defoverridable HLS.Playlist.Tag
     end
   end
 

@@ -1,10 +1,10 @@
-defmodule Membrane.HLS.PlaylistTest do
+defmodule HLS.PlaylistTest do
   use ExUnit.Case
 
-  alias Membrane.HLS.Playlist
-  alias Membrane.HLS.Playlist.{Master, Media}
-  alias Membrane.HLS.VariantStream
-  alias Membrane.HLS.AlternativeRendition
+  alias HLS.Playlist
+  alias HLS.Playlist.{Master, Media}
+  alias HLS.VariantStream
+  alias HLS.AlternativeRendition
 
   describe "Unmarshal Master Playlist" do
     test "fails with empty content" do

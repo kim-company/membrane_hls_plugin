@@ -1,10 +1,10 @@
-defmodule Membrane.HLS.StorageTest do
+defmodule HLS.StorageTest do
   use ExUnit.Case
 
-  alias Membrane.HLS.Storage.FS
-  alias Membrane.HLS.Storage
-  alias Membrane.HLS.Playlist.Master
-  alias Membrane.HLS.Playlist.Media
+  alias HLS.Storage.FS
+  alias HLS.Storage
+  alias HLS.Playlist.Master
+  alias HLS.Playlist.Media
 
   @master_playlist_path "./fixtures/mpeg-ts/stream.m3u8"
   @store Storage.new(%FS{location: @master_playlist_path})

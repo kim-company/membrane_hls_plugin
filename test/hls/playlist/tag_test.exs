@@ -1,6 +1,6 @@
-defmodule Membrane.HLS.Playlist.TagTest do
+defmodule HLS.Playlist.TagTest do
   use ExUnit.Case
-  alias Membrane.HLS.Playlist.Tag
+  alias HLS.Playlist.Tag
 
   describe "Parse attribute list" do
     test "of stream alternative tag" do

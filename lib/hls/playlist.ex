@@ -1,9 +1,9 @@
-defmodule Membrane.HLS.Playlist do
+defmodule HLS.Playlist do
   @moduledoc """
   HLS Playlist parses based on RFC 8216.
   """
 
-  alias Membrane.HLS.Playlist.Tag
+  alias HLS.Playlist.Tag
 
   @type tag_map_t :: %{required(Tag.tag_id_t() | {pos_integer(), :segment}) => [Tag.t()]}
 

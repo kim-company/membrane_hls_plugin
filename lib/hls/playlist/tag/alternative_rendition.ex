@@ -1,5 +1,5 @@
-defmodule Membrane.HLS.Playlist.Tag.AlternativeRendition do
-  use Membrane.HLS.Playlist.Tag, id: :ext_x_media
+defmodule HLS.Playlist.Tag.AlternativeRendition do
+  use HLS.Playlist.Tag, id: :ext_x_media
 
   @impl true
   def unmarshal(line) do

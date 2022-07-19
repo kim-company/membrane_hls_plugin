@@ -1,10 +1,10 @@
-defmodule Membrane.HLS.Playlist.Master do
-  alias Membrane.HLS.VariantStream
-  alias Membrane.HLS.AlternativeRendition
-  alias Membrane.HLS.Playlist
-  alias Membrane.HLS.Playlist.Tag
+defmodule HLS.Playlist.Master do
+  alias HLS.VariantStream
+  alias HLS.AlternativeRendition
+  alias HLS.Playlist
+  alias HLS.Playlist.Tag
 
-  @behaviour Membrane.HLS.Playlist
+  @behaviour HLS.Playlist
 
   @type t :: %__MODULE__{
           tags: Playlist.tag_map_t(),

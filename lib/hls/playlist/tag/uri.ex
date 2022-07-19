@@ -1,6 +1,6 @@
-defmodule Membrane.HLS.Playlist.Tag.SegmentURI do
-  @behaviour Membrane.HLS.Playlist.Tag
-  alias Membrane.HLS.Playlist.Tag
+defmodule HLS.Playlist.Tag.SegmentURI do
+  @behaviour HLS.Playlist.Tag
+  alias HLS.Playlist.Tag
 
   @impl true
   def has_uri?(), do: true

@@ -1,16 +1,16 @@
-defmodule Membrane.HLS.TrackerTest do
+defmodule HLS.TrackerTest do
   use ExUnit.Case
 
-  alias Membrane.HLS.Tracker
-  alias Membrane.HLS.Segment
-  alias Membrane.HLS.Storage
-  alias Membrane.HLS.Storage.FS
+  alias HLS.Tracker
+  alias HLS.Segment
+  alias HLS.Storage
+  alias HLS.Storage.FS
 
   @master_playlist_path "./fixtures/mpeg-ts/stream.m3u8"
   @store Storage.new(%FS{location: @master_playlist_path})
 
   defmodule OneMoreMediaStorage do
-    @behaviour Membrane.HLS.Storage
+    @behaviour HLS.Storage
 
     @media_track_path "one_more.m3u8"
 

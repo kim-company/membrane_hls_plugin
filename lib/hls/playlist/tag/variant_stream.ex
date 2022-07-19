@@ -1,5 +1,5 @@
-defmodule Membrane.HLS.Playlist.Tag.VariantStream do
-  use Membrane.HLS.Playlist.Tag, id: :ext_x_stream_inf
+defmodule HLS.Playlist.Tag.VariantStream do
+  use HLS.Playlist.Tag, id: :ext_x_stream_inf
 
   @impl true
   def is_multiline?(), do: true
