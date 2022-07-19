@@ -10,9 +10,19 @@ defmodule Membrane.HLS.Playlist.Tag.AlternativeRendition do
       "GROUP-ID", val -> {:group_id, val}
       "NAME", val -> {:name, val}
       "LANGUAGE", val -> {:language, val}
+      "ASSOC-LANGUAGE", val -> {:assoc_language, val}
+      "DEFAULT", val -> {:default, parse_yes_no(val)}
+      "AUTOSELECT", val -> {:autoselect, parse_yes_no(val)}
+      "FORCED", val -> {:forced, parse_yes_no(val)}
+      "INSTREAM-ID", val -> {:instream_id, val}
+      "CHARACTERISTICS", val -> {:characteristics, val}
+      "CHANNELS", val -> {:channels, val}
       _key, _val -> :skip
     end)
   end
+
+  defp parse_yes_no("YES"), do: true
+  defp parse_yes_no("NO"), do: false
 
   def rendition_type_to_atom("SUBTITLES"), do: :subtitles
   def rendition_type_to_atom("CLOSED-CAPTIONS"), do: :closed_captions

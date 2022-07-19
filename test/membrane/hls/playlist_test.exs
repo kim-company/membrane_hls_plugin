@@ -59,11 +59,11 @@ defmodule Membrane.HLS.PlaylistTest do
         bandwidth: 1_478_400,
         average_bandwidth: 1_425_600,
         codecs: ["avc1.4d4029", "mp4a.40.2"],
-        resolution: [416, 234],
+        resolution: {854, 480},
         frame_rate: 30.0
       ]
       |> Enum.each(fn {key, val} ->
-        assert Map.get(stream, key, val) == val
+        assert Map.get(stream, key) == val, "expected #{inspect val} on key #{inspect key}"
       end)
     end
 
@@ -78,7 +78,7 @@ defmodule Membrane.HLS.PlaylistTest do
       manifest = Playlist.unmarshal(content, Master)
       stream = List.first(Master.variant_streams(manifest))
 
-      assert stream.attributes.uri == %URI{
+      assert stream.uri == %URI{
                path: "stream_with_token.m3u8",
                query:
                  "t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTc5MTYzMDcsImlhdCI6MTY1Nzg3MzEwNywiaXNzIjoiY2RwIiwia2VlcF9zZWdtZW50cyI6bnVsbCwia2luZCI6ImNoaWxkIiwicGFyZW50IjoiNmhReUhyUGRhRTNuL3N0cmVhbS5tM3U4Iiwic3ViIjoiNmhReUhyUGRhRTNuL3N0cmVhbV82NDB4MzYwXzgwMGsubTN1OCIsInRyaW1fZnJvbSI6NTIxLCJ0cmltX3RvIjpudWxsLCJ1c2VyX2lkIjoiMzA2IiwidXVpZCI6bnVsbCwidmlzaXRvcl9pZCI6ImI0NGFlZjYyLTA0MTYtMTFlZC04NTRmLTBhNThhOWZlYWMwMiJ9.eVrBzEBbjHxDcg6xnZXfXy0ZoNoj_seaZwaja_WDwuc"
@@ -114,7 +114,7 @@ defmodule Membrane.HLS.PlaylistTest do
         }
       ]
       |> Enum.each(fn {key, val} ->
-        assert Map.get(rendition.attributes, key, val) == val
+        assert Map.get(rendition, key) == val, "expected #{inspect val} on key #{inspect key}"
       end)
     end
   end

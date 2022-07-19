@@ -1,5 +1,7 @@
 defmodule Membrane.HLS.Playlist.Tag do
 
+  @type group_id_t :: String.t()
+
   @type tag_class_t :: :media_segment | :media_playlist | :master_playlist | :playlist | :master_or_media_playlist
 
   # appear in both master and media playlists

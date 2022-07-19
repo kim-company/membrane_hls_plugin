@@ -15,6 +15,15 @@ defmodule Membrane.HLS.Playlist.Tag.VariantStream do
       "VIDEO", val -> {:video, val}
       "SUBTITLES", val -> {:subtitles, val}
       "CLOSED-CAPTIONS", val -> {:closed_captions, val}
+      "FRAME-RATE", val -> {:frame_rate, String.to_float(val)}
+      "RESOLUTION", val ->
+        [width, height] =
+          val
+          |> String.split("x")
+          |> Enum.map(&String.to_integer/1)
+
+        {:resolution, {width, height}}
+
       _key, _val -> :skip
     end)
     |> Map.put_new(:uri, URI.parse(stream_uri))
