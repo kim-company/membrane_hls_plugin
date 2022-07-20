@@ -2,11 +2,12 @@ defmodule Membrane.HLS.Source do
   use Membrane.Source
 
   alias Membrane.Buffer
+  alias Membrane.HLS.Format
   require Membrane.Logger
 
   def_output_pad(:output, [
     mode: :push,
-    caps: :any,
+    caps: [Format.PackedAudio, Format.WebVTT, Format.MPEG],
   ])
 
   def_options([
@@ -21,8 +22,8 @@ defmodule Membrane.HLS.Source do
 
   @impl true
   def handle_stopped_to_prepared(_ctx, state) do
-    # TODO: publish appropriate caps
-    {{:ok, [caps: {:output, :any}]}, state}
+    caps = build_caps(state.rendition)
+    {{:ok, [caps: {:output, caps}]}, state}
   end
 
   @impl true
@@ -74,4 +75,10 @@ defmodule Membrane.HLS.Source do
   defp audit_tracking_reference(have, want) when have != want, do:
     raise ArgumentError, "While following tracking #{inspect want} a message with reference #{inspect have} was received"
   defp audit_tracking_reference(_have, _want), do: :ok
+
+  defp build_caps(%HLS.VariantStream{codecs: codecs}), do: %Format.MPEG{codecs: codecs}
+  defp build_caps(%HLS.AlternativeRendition{type: :subtitles, language: lang}), do: %Format.WebVTT{language: lang}
+  defp build_caps(%HLS.AlternativeRendition{type: :audio}), do: %Format.PackedAudio{}
+  defp build_caps(rendition), do:
+    raise ArgumentError, "Unable to provide a proper cap for rendition #{inspect rendition}"
 end

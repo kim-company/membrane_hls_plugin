@@ -2,6 +2,8 @@ defmodule Membrane.HLS.SourceTest do
   use ExUnit.Case
 
   alias Membrane.HLS.Source
+  alias Membrane.HLS.Format
+
   alias Membrane.Testing
   alias HLS.Storage
   alias HLS.Playlist.Master
@@ -30,6 +32,7 @@ defmodule Membrane.HLS.SourceTest do
       )
 
       assert_start_of_stream(pid, :sink)
+      assert_sink_caps(pid, :sink, %Format.MPEG{})
 
       # Asserting that each chunks in the selected playlist is seen by the sink
       base_dir = Path.join([Path.dirname(@master_playlist_path), stream_name, "00000"])
