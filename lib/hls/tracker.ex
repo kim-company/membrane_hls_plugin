@@ -7,8 +7,7 @@ defmodule HLS.Tracker do
 
   defstruct [:storage, following: %{}]
 
-  @type metadata_t :: Map.t()
-  @type target_t :: {URI.t(), metadata_t}
+  @type target_t :: URI.t()
 
   defmodule Tracking do
     defstruct [:ref, :target, :follower, started: false, next_seq: 0]
@@ -50,7 +49,7 @@ defmodule HLS.Tracker do
   end
 
   defp handle_refresh(tracking, state) do
-    {uri, metadata} = tracking.target
+    uri = tracking.target
     playlist = Storage.get_media_playlist!(state.storage, uri)
 
     # Determine initial sequence number, sending the start_of_track message if
@@ -75,7 +74,7 @@ defmodule HLS.Tracker do
     # Send new segments only
     segs
     |> Enum.filter(fn seg -> seg.absolute_sequence >= tracking.next_seq end)
-    |> Enum.map(fn seg -> {:segment, tracking.ref, {seg, metadata}} end)
+    |> Enum.map(fn seg -> {:segment, tracking.ref, seg} end)
     |> Enum.each(&send(tracking.follower, &1))
 
     # Schedule a new refresh if needed

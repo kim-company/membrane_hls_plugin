@@ -88,12 +88,12 @@ defmodule HLS.TrackerTest do
 
     test "sends one message for each segment in a static track" do
       {:ok, pid} = Tracker.start_link(@store)
-      ref = Tracker.follow(pid, {URI.parse("stream_416x234.m3u8"), %{}})
+      ref = Tracker.follow(pid, URI.parse("stream_416x234.m3u8"))
 
       # sequence goes from 1 to 5 as the target playlist starts with a media
       # sequence number of 1.
       Enum.each(1..5, fn seq ->
-        assert_receive {:segment, ^ref, {%Segment{absolute_sequence: ^seq}, _}}, 1000
+        assert_receive {:segment, ^ref, %Segment{absolute_sequence: ^seq}}, 1000
       end)
 
       refute_received {:segment, ^ref, _}, 1000
@@ -104,7 +104,7 @@ defmodule HLS.TrackerTest do
     #
     test "sends start of track message identifing first sequence number" do
       {:ok, pid} = Tracker.start_link(@store)
-      ref = Tracker.follow(pid, {URI.parse("stream_416x234.m3u8"), %{}})
+      ref = Tracker.follow(pid, URI.parse("stream_416x234.m3u8"))
 
       assert_receive {:start_of_track, ^ref, 1}, 1000
 
@@ -113,7 +113,7 @@ defmodule HLS.TrackerTest do
 
     test "sends track termination message when track is finished" do
       {:ok, pid} = Tracker.start_link(@store)
-      ref = Tracker.follow(pid, {URI.parse("stream_416x234.m3u8"), %{}})
+      ref = Tracker.follow(pid, URI.parse("stream_416x234.m3u8"))
 
       assert_receive {:end_of_track, ^ref}, 1000
 
@@ -123,16 +123,16 @@ defmodule HLS.TrackerTest do
     test "keeps on sending updates when the playlist does" do
       store = Storage.new(%OneMoreMediaStorage{initial: 1, target_duration: 1})
       {:ok, pid} = Tracker.start_link(store)
-      ref = Tracker.follow(pid, {URI.parse("one_more.m3u8"), %{}})
+      ref = Tracker.follow(pid, URI.parse("one_more.m3u8"))
 
-      assert_receive {:segment, ^ref, {%Segment{absolute_sequence: 0}, _}}, 200
-      assert_receive {:segment, ^ref, {%Segment{absolute_sequence: 1}, _}}, 200
+      assert_receive {:segment, ^ref, %Segment{absolute_sequence: 0}}, 200
+      assert_receive {:segment, ^ref, %Segment{absolute_sequence: 1}}, 200
 
       # The tracker should wait `target_duration` seconds, reload the track
       # afterwards and detect that one more segment has been provied, together
       # with the termination tag.
 
-      assert_receive {:segment, ^ref, {%Segment{absolute_sequence: 2}, _}}, 2000
+      assert_receive {:segment, ^ref, %Segment{absolute_sequence: 2}}, 2000
       refute_received {:segment, ^ref, _}, 2000
       assert_receive {:end_of_track, ^ref}, 2000
 
