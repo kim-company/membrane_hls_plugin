@@ -33,6 +33,7 @@ defmodule Membrane.HLS.SourceTest do
       # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
       # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
       # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
+      assert_start_of_stream(pid, :sink)
       assert_end_of_stream(pid, :sink)
     end
   end

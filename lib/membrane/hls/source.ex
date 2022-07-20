@@ -1,5 +1,6 @@
 defmodule Membrane.HLS.Source do
   use Membrane.Source
+  alias Membrane.Buffer
 
   def_output_pad(:output, [
     mode: :pull,
@@ -23,6 +24,6 @@ defmodule Membrane.HLS.Source do
 
   @impl true
   def handle_demand(:output, _size, :buffers, _ctx, state) do
-    {{:ok, [{:end_of_stream, :output}]}, state}
+    {{:ok, [{:buffer, {:output, %Buffer{payload: [1, 2, 3]}}}, {:end_of_stream, :output}]}, state}
   end
 end
