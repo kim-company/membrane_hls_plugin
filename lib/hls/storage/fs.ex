@@ -2,14 +2,13 @@ defmodule HLS.Storage.FS do
   @behaviour HLS.Storage
 
   @enforce_keys [:location]
-  defstruct @enforce_keys ++ [:dirname, :basename, :manifest_ext]
+  defstruct @enforce_keys ++ [:dirname, :basename]
 
   @impl true
   def init(config = %__MODULE__{location: location}) do
     basename = Path.basename(location)
     dirname = Path.dirname(location)
-    ext = Path.extname(basename)
-    %__MODULE__{config | basename: basename, dirname: dirname, manifest_ext: ext}
+    %__MODULE__{config | basename: basename, dirname: dirname}
   end
 
   @impl true

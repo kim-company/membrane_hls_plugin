@@ -13,14 +13,15 @@ defmodule Membrane.HLS.SourceTest do
 
   describe "hls source" do
     test "provides all segments of selected stream" do
+      stream_name = "stream_416x234" 
       stream =
         @store
         |> Storage.get_master_playlist!()
         |> Master.variant_streams()
-        |> List.first()
+        |> Enum.find(fn stream -> stream.uri.path == stream_name <> ".m3u8" end)
 
       children = [
-        source: %Source{storage: @store, target: stream},
+        source: %Source{storage: @store, rendition: stream},
         sink: %Testing.Sink{}
       ]
 
@@ -28,12 +29,17 @@ defmodule Membrane.HLS.SourceTest do
         links: Membrane.ParentSpec.link_linear(children)
       )
 
-      # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
-      # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
-      # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
-      # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
-      # assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: 255})
       assert_start_of_stream(pid, :sink)
+
+      # Asserting that each chunks in the selected playlist is seen by the sink
+      base_dir = Path.join([Path.dirname(@master_playlist_path), stream_name, "00000"])
+
+      base_dir
+      |> File.ls!()
+      |> Enum.map(&Path.join([base_dir, &1]))
+      |> Enum.map(&File.read!/1)
+      |> Enum.each(&assert_sink_buffer(pid, :sink ,%Membrane.Buffer{payload: &1}, 5_000))
+
       assert_end_of_stream(pid, :sink)
     end
   end
