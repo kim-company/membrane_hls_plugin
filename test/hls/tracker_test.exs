@@ -55,7 +55,6 @@ defmodule HLS.TrackerTest do
       #EXT-X-VERSION:7
       #EXT-X-TARGETDURATION:#{config.target_duration}
       #EXT-X-MEDIA-SEQUENCE:0
-      #EXT-X-DISCONTINUITY-SEQUENCE:0
       """
 
       calls = config.calls
@@ -133,6 +132,25 @@ defmodule HLS.TrackerTest do
       # with the termination tag.
 
       assert_receive {:segment, ^ref, %Segment{absolute_sequence: 2}}, 2000
+      refute_received {:segment, ^ref, _}, 2000
+      assert_receive {:end_of_track, ^ref}, 2000
+
+      :ok = Tracker.stop(pid)
+    end
+
+    test "when the playlist is not finished, it does not deliver more than 3 packets at first" do
+      store = Storage.new(%OneMoreMediaStorage{initial: 4, target_duration: 1})
+      {:ok, pid} = Tracker.start_link(store)
+      ref = Tracker.follow(pid, URI.parse("one_more.m3u8"))
+
+      assert_receive {:start_of_track, ^ref, 2}, 200
+
+      assert_receive {:segment, ^ref, %Segment{absolute_sequence: 2}}, 200
+      assert_receive {:segment, ^ref, %Segment{absolute_sequence: 3}}, 200
+      assert_receive {:segment, ^ref, %Segment{absolute_sequence: 4}}, 200
+
+      assert_receive {:segment, ^ref, %Segment{absolute_sequence: 5}}, 2000
+
       refute_received {:segment, ^ref, _}, 2000
       assert_receive {:end_of_track, ^ref}, 2000
 

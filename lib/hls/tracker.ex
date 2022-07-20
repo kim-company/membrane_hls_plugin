@@ -9,6 +9,8 @@ defmodule HLS.Tracker do
 
   @type target_t :: URI.t()
 
+  @max_initial_live_segments 3
+
   defmodule Tracking do
     defstruct [:ref, :target, :follower, started: false, next_seq: 0]
   end
@@ -51,6 +53,7 @@ defmodule HLS.Tracker do
   defp handle_refresh(tracking, state) do
     uri = tracking.target
     playlist = Storage.get_media_playlist!(state.storage, uri)
+    segs = Media.segments(playlist)
 
     # Determine initial sequence number, sending the start_of_track message if
     # needed.
@@ -58,14 +61,18 @@ defmodule HLS.Tracker do
       if tracking.started do
         tracking
       else
-        seq = playlist.media_sequence_number
-        send(tracking.follower, {:start_of_track, tracking.ref, seq})
-        %Tracking{tracking | next_seq: seq, started: true}
+        next_seq = if !playlist.finished && length(segs) > @max_initial_live_segments do
+          playlist.media_sequence_number + (length(segs) - @max_initial_live_segments)
+        else
+          playlist.media_sequence_number
+        end
+
+        send(tracking.follower, {:start_of_track, tracking.ref, next_seq})
+        %Tracking{tracking | next_seq: next_seq, started: true}
       end
 
     {segs, last_seq} =
-      playlist
-      |> Media.segments()
+      segs
       |> Enum.map_reduce(0, fn seg, _ ->
         seg = Segment.update_absolute_sequence(seg, playlist.media_sequence_number)
         {seg, seg.absolute_sequence}
