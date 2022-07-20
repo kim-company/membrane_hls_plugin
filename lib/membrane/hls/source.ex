@@ -6,7 +6,7 @@ defmodule Membrane.HLS.Source do
   require Membrane.Logger
 
   def_output_pad(:output, [
-    mode: :push,
+    mode: :pull,
     caps: [Format.PackedAudio, Format.WebVTT, Format.MPEG],
   ])
 
@@ -32,8 +32,8 @@ defmodule Membrane.HLS.Source do
     target = build_target(state.rendition)
     ref = HLS.Tracker.follow(pid, target)
 
-    tracking_config = [tracking: ref, tracker: pid]
-    state = Enum.reduce(tracking_config, state, fn {key, val}, state ->
+    config = [tracking: ref, tracker: pid, queue: Qex.new(), queued: 0, closed: false]
+    state = Enum.reduce(config, state, fn {key, val}, state ->
       Map.put(state, key, val)
     end)
 
@@ -43,30 +43,67 @@ defmodule Membrane.HLS.Source do
   @impl true
   def handle_prepared_to_stopped(_ctx, state) do
     HLS.Tracker.stop(state.tracking)
-    state = Enum.reduce([:tracking, :tracker], state, fn key, state ->
+    state = Enum.reduce([:tracking, :tracker, :queue, :queued, :closed], state, fn key, state ->
       Map.delete(state, key)
     end)
     {:ok, state}
+  end
+
+  def handle_demand(:output, _size, :buffers, _ctx, state = %{queued: 0}) do
+    # Put the output pad on hold. As soon as the first packet is received,
+    # notify it to redemand.
+    {:ok, state}
+  end
+
+  def handle_demand(:output, _size, :buffers, _ctx, state) do
+    {segment, queue} = Qex.pop!(state.queue)
+    queued = state.queued - 1
+    state = %{state | queue: queue, queued: queued}
+
+    data = HLS.Storage.get_segment!(state.storage, segment.uri)
+    buffer = %Buffer{payload: data, metadata: segment}
+    action = {:buffer, {:output, buffer}}
+
+    actions = cond do
+      queued > 0 -> [action, {:redemand, :output}]
+      state.closed -> [action, {:end_of_stream, :output}]
+      true -> [action]
+    end
+    {{:ok, actions}, state}
   end
 
   @impl true
   def handle_other({:segment, ref, segment}, _ctx, state) do
     audit_tracking_reference(ref, state.tracking)
 
-    data = HLS.Storage.get_segment!(state.storage, segment.uri)
-    buffer = %Buffer{payload: data, metadata: segment}
-    action = {:buffer, {:output, buffer}}
-    {{:ok, [action]}, state}
+    queue = Qex.push(state.queue, segment)
+    queued = state.queued + 1
+    state = %{state | queue: queue, queued: queued}
+
+    if state.queued == 1 do
+      # It means that the previous demand request was put on hold. Tell our
+      # output pad that we're ready to provide one more chunk.
+      {{:ok, [{:redemand, :output}]}, state}
+    else
+      {:ok, state}
+    end
+  end
+
+  def handle_other({:start_of_track, ref, _next_sequence}, _ctx, state) do
+    audit_tracking_reference(ref, state.tracking)
+    {:ok, state}
   end
 
   def handle_other({:end_of_track, ref}, _ctx, state) do
     audit_tracking_reference(ref, state.tracking)
-    {{:ok, [{:end_of_stream, :output}]}, state}
-  end
-
-  def handle_other({:start_of_track, ref, _}, _ctx, state) do
-    audit_tracking_reference(ref, state.tracking)
-    {:ok, state}
+    state = %{state | closed: true}
+    if state.queued == 0 do
+      # If the output pad was on hold it would not call re-demand and we won't
+      # have a chance to notify it.
+      {{:ok, [{:end_of_stream, :output}]}, state}
+    else
+      {:ok, state}
+    end
   end
 
   defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
