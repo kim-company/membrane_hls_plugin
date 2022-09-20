@@ -1,4 +1,4 @@
-defmodule HLS.Tracker do
+defmodule HLS.Playlist.Media.Tracker do
   use GenServer
 
   alias HLS.Storage
@@ -61,11 +61,12 @@ defmodule HLS.Tracker do
       if tracking.started do
         tracking
       else
-        next_seq = if !playlist.finished && length(segs) > @max_initial_live_segments do
-          playlist.media_sequence_number + (length(segs) - @max_initial_live_segments)
-        else
-          playlist.media_sequence_number
-        end
+        next_seq =
+          if !playlist.finished && length(segs) > @max_initial_live_segments do
+            playlist.media_sequence_number + (length(segs) - @max_initial_live_segments)
+          else
+            playlist.media_sequence_number
+          end
 
         send(tracking.follower, {:start_of_track, tracking.ref, next_seq})
         %Tracking{tracking | next_seq: next_seq, started: true}

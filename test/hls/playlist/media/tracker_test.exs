@@ -1,7 +1,7 @@
-defmodule HLS.TrackerTest do
+defmodule HLS.Playlist.Media.TrackerTest do
   use ExUnit.Case
 
-  alias HLS.Tracker
+  alias HLS.Playlist.Media.Tracker
   alias HLS.Segment
   alias HLS.Storage
   alias HLS.Storage.FS
