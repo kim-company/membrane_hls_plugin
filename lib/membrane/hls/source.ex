@@ -2,11 +2,11 @@ defmodule Membrane.HLS.Source do
   use Membrane.Source
 
   alias HLS.Storage
+  alias HLS.Playlist.Media.Tracker
   alias Membrane.Buffer
   alias Membrane.HLS.Format
 
   @master_check_retry_interval_ms 1_000
-
   require Membrane.Logger
 
   def_output_pad(:output,
@@ -24,16 +24,23 @@ defmodule Membrane.HLS.Source do
 
   @impl true
   def handle_init(options) do
-    {:ok, %{storage: options.storage}}
+    {:ok, %{storage: options.storage, pad_to_tracker: %{}, ref_to_pad: %{}}}
   end
 
-  # @impl true
-  # def handle_pad_added(pad, _, state) do
-  #   # TODO: send caps, see build_caps
-  # caps = build_caps(state.rendition)
-  # {{:ok, [caps: {:output, caps}]}, state}
-  #   {:ok, state}
-  # end
+  @impl true
+  def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _, state) do
+    {:ok, pid} = Tracker.start_link(state.storage)
+    target = build_target(rendition)
+    ref = Tracker.follow(pid, target)
+    config = %{tracking: ref, tracker: pid, queue: Qex.new(), queued: 0, closed: false}
+
+    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
+    state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
+
+    caps = build_caps(rendition)
+
+    {{:ok, [caps: {pad, caps}]}, state}
+  end
 
   @impl true
   def handle_stopped_to_prepared(_ctx, state) do
@@ -41,27 +48,7 @@ defmodule Membrane.HLS.Source do
     {:ok, state}
   end
 
-  # @impl true
-  # def handle_prepared_to_playing(_ctx, state) do
-  # end
-  #
-  # @impl true
-  # def handle_prepared_to_playing(_ctx, state) do
-  #   {:ok, pid} = HLS.Tracker.start_link(state.storage)
-  #   target = build_target(state.rendition)
-  #   ref = HLS.Tracker.follow(pid, target)
-  #
-  #   config = [tracking: ref, tracker: pid, queue: Qex.new(), queued: 0, closed: false]
-  #
-  #   state =
-  #     Enum.reduce(config, state, fn {key, val}, state ->
-  #       Map.put(state, key, val)
-  #     end)
-  #
-  #   {:ok, state}
-  # end
-
-  #
+  # TODO
   # @impl true
   # def handle_prepared_to_stopped(_ctx, state) do
   #   HLS.Tracker.stop(state.tracking)
@@ -74,29 +61,18 @@ defmodule Membrane.HLS.Source do
   #   {:ok, state}
   # end
 
-  def handle_demand(:output, _size, :buffers, _ctx, state = %{queued: 0}) do
-    # Put the output pad on hold. As soon as the first packet is received,
-    # notify it to redemand.
-    {:ok, state}
-  end
+  def handle_demand(pad, _size, :buffers, _ctx, state) do
+    tracker = Map.fetch!(state.pad_to_tracker, pad)
 
-  def handle_demand(:output, _size, :buffers, _ctx, state) do
-    {segment, queue} = Qex.pop!(state.queue)
-    queued = state.queued - 1
-    state = %{state | queue: queue, queued: queued}
-
-    data = HLS.Storage.get_segment!(state.storage, segment.uri)
-    buffer = %Buffer{payload: data, metadata: segment}
-    action = {:buffer, {:output, buffer}}
-
-    actions =
-      cond do
-        queued > 0 -> [action, {:redemand, :output}]
-        state.closed -> [action, {:end_of_stream, :output}]
-        true -> [action]
-      end
-
-    {{:ok, actions}, state}
+    if tracker.queued == 0 do
+      # Put the output pad on hold. As soon as the first packet is received,
+      # notify it to redemand.
+      {:ok, state}
+    else
+      {actions, tracker} = fulfill_demand(state.storage, pad, tracker)
+      state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
+      {{:ok, actions}, state}
+    end
   end
 
   @impl true
@@ -118,34 +94,37 @@ defmodule Membrane.HLS.Source do
   end
 
   def handle_other({:segment, ref, segment}, _ctx, state) do
-    audit_tracking_reference(ref, state.tracking)
+    pad = Map.fetch!(state.ref_to_pad, ref)
+    tracker = Map.fetch!(state.pad_to_tracker, pad)
 
-    queue = Qex.push(state.queue, segment)
-    queued = state.queued + 1
-    state = %{state | queue: queue, queued: queued}
+    queue = Qex.push(tracker.queue, segment)
+    queued = tracker.queued + 1
+    tracker = %{tracker | queue: queue, queued: queued}
+    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    if state.queued == 1 do
+    if tracker.queued == 1 do
       # It means that the previous demand request was put on hold. Tell our
       # output pad that we're ready to provide one more chunk.
-      {{:ok, [{:redemand, :output}]}, state}
+      {{:ok, [{:redemand, pad}]}, state}
     else
       {:ok, state}
     end
   end
 
-  def handle_other({:start_of_track, ref, _next_sequence}, _ctx, state) do
-    audit_tracking_reference(ref, state.tracking)
+  def handle_other({:start_of_track, _ref, _next_sequence}, _ctx, state) do
     {:ok, state}
   end
 
   def handle_other({:end_of_track, ref}, _ctx, state) do
-    audit_tracking_reference(ref, state.tracking)
-    state = %{state | closed: true}
+    pad = Map.fetch!(state.ref_to_pad, ref)
+    tracker = Map.fetch!(state.pad_to_tracker, pad)
+    tracker = %{tracker | closed: true}
+    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    if state.queued == 0 do
+    if tracker.queued == 0 do
       # If the output pad was on hold it would not call re-demand and we won't
       # have a chance to notify it.
-      {{:ok, [{:end_of_stream, :output}]}, state}
+      {{:ok, [{:end_of_stream, pad}]}, state}
     else
       {:ok, state}
     end
@@ -153,15 +132,6 @@ defmodule Membrane.HLS.Source do
 
   defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
   defp build_target(%HLS.VariantStream{uri: uri}), do: uri
-
-  defp audit_tracking_reference(have, want) when have != want,
-    do:
-      raise(
-        ArgumentError,
-        "While following tracking #{inspect(want)} a message with reference #{inspect(have)} was received"
-      )
-
-  defp audit_tracking_reference(_have, _want), do: :ok
 
   defp build_caps(%HLS.VariantStream{codecs: codecs}), do: %Format.MPEG{codecs: codecs}
 
@@ -172,4 +142,22 @@ defmodule Membrane.HLS.Source do
 
   defp build_caps(rendition),
     do: raise(ArgumentError, "Unable to provide a proper cap for rendition #{inspect(rendition)}")
+
+  defp fulfill_demand(storage, pad, tracker) do
+    {segment, queue} = Qex.pop!(tracker.queue)
+    queued = tracker.queued - 1
+    tracker = %{tracker | queue: queue, queued: queued}
+
+    data = HLS.Storage.get_segment!(storage, segment.uri)
+    action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
+
+    actions =
+      cond do
+        queued > 0 -> [action, {:redemand, pad}]
+        tracker.closed -> [action, {:end_of_stream, pad}]
+        true -> [action]
+      end
+
+    {actions, tracker}
+  end
 end
