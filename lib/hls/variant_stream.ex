@@ -16,7 +16,9 @@ defmodule HLS.VariantStream do
           closed_captions: Tag.group_id_t(),
           alternatives: %{required(AlternativeRendition.type_t()) => [AlternativeRendition.t()]}
         }
-  @enforce_keys [:uri, :bandwidth, :codecs]
+
+  @mandatory_keys [:uri, :bandwidth, :codecs]
+  @enforce_keys @mandatory_keys
   @optional_keys [
     :average_bandwidth,
     :resolution,
@@ -35,7 +37,7 @@ defmodule HLS.VariantStream do
     end
 
     mandatory =
-      @enforce_keys
+      @mandatory_keys
       |> Enum.map(fn key -> {key, Map.fetch!(attrs, key)} end)
       |> Enum.into(%{})
 

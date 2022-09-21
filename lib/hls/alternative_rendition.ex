@@ -17,7 +17,8 @@ defmodule HLS.AlternativeRendition do
           characteristics: String.t()
         }
 
-  @enforce_keys [:type, :group_id, :name]
+  @mandatory_keys [:type, :group_id, :name]
+  @enforce_keys @mandatory_keys
   @optional_keys [
     :uri,
     :language,
@@ -38,7 +39,7 @@ defmodule HLS.AlternativeRendition do
     end
 
     mandatory =
-      @enforce_keys
+      @mandatory_keys
       |> Enum.map(fn key -> {key, Map.fetch!(attrs, key)} end)
       |> Enum.into(%{})
 

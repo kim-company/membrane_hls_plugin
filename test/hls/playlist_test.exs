@@ -63,7 +63,10 @@ defmodule HLS.PlaylistTest do
         frame_rate: 30.0
       ]
       |> Enum.each(fn {key, val} ->
-        assert Map.get(stream, key) == val, "expected #{inspect(val)} on key #{inspect(key)}"
+        have = Map.get(stream, key)
+
+        assert have == val,
+               "expected #{inspect(val)} on key #{inspect(key)}, have #{inspect(have)}"
       end)
     end
 

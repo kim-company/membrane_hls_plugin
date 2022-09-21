@@ -30,6 +30,14 @@ defmodule HLS.Storage do
     }
   end
 
+  def new(url = "http" <> _rest) do
+    new(%HLS.Storage.HTTP{url: url})
+  end
+
+  def new(path) when is_binary(path) do
+    new(%HLS.Storage.FS{location: path})
+  end
+
   @spec get_master_playlist(t) :: {:ok, Master.t()} | error_t()
   def get_master_playlist(storage) do
     with {:ok, content} <- storage.adapter.get(storage.state) do
