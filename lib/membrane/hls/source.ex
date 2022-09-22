@@ -48,19 +48,6 @@ defmodule Membrane.HLS.Source do
     {:ok, state}
   end
 
-  # TODO
-  # @impl true
-  # def handle_prepared_to_stopped(_ctx, state) do
-  #   HLS.Tracker.stop(state.tracking)
-  #
-  #   state =
-  #     Enum.reduce([:tracking, :tracker, :queue, :queued, :closed], state, fn key, state ->
-  #       Map.delete(state, key)
-  #     end)
-  #
-  #   {:ok, state}
-  # end
-
   def handle_demand(pad, _size, :buffers, _ctx, state) do
     tracker = Map.fetch!(state.pad_to_tracker, pad)
 
@@ -94,6 +81,8 @@ defmodule Membrane.HLS.Source do
   end
 
   def handle_other({:segment, ref, segment}, _ctx, state) do
+    Membrane.Logger.debug("HLS segment received on #{inspect(ref)}: #{inspect(segment)}")
+
     pad = Map.fetch!(state.ref_to_pad, ref)
     tracker = Map.fetch!(state.pad_to_tracker, pad)
 
@@ -129,6 +118,19 @@ defmodule Membrane.HLS.Source do
       {:ok, state}
     end
   end
+
+  # TODO
+  # @impl true
+  # def handle_prepared_to_stopped(_ctx, state) do
+  #   HLS.Tracker.stop(state.tracking)
+  #
+  #   state =
+  #     Enum.reduce([:tracking, :tracker, :queue, :queued, :closed], state, fn key, state ->
+  #       Map.delete(state, key)
+  #     end)
+  #
+  #   {:ok, state}
+  # end
 
   defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
   defp build_target(%HLS.VariantStream{uri: uri}), do: uri
