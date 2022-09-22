@@ -38,6 +38,7 @@ defmodule HLS.Storage.HTTP do
     |> Enum.into([])
   end
 
-  defp handle_response({:ok, %Tesla.Env{body: body}}), do: {:ok, body}
+  defp handle_response({:ok, %Tesla.Env{body: body, status: 200}}), do: {:ok, body}
+  defp handle_response({:ok, %Tesla.Env{status: status}}), do: {:error, {:status, status}}
   defp handle_response(err = {:error, _reason}), do: err
 end

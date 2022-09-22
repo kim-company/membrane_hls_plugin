@@ -68,7 +68,7 @@ defmodule Membrane.HLS.Source do
           "Master playlist check attempt scheduled in #{@master_check_retry_interval_ms}ms"
         )
 
-        Process.send_after(self(), :check_master_plalist, @master_check_retry_interval_ms)
+        Process.send_after(self(), :check_master_playlist, @master_check_retry_interval_ms)
         {:ok, state}
     end
   end
