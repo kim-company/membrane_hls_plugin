@@ -7,7 +7,8 @@ defmodule HLS.Storage.HTTP do
   @impl true
   def init(config = %__MODULE__{url: url}) do
     uri = URI.parse(url)
-    base_url = "#{uri.scheme}://#{uri.host}#{Path.dirname(uri.path)}"
+    base_url = "#{uri.scheme}://#{uri.authority}#{Path.dirname(uri.path)}"
+
     middleware = [
       {Tesla.Middleware.BaseUrl, base_url}
     ]
@@ -30,6 +31,7 @@ defmodule HLS.Storage.HTTP do
   end
 
   defp decode_query(nil), do: []
+
   defp decode_query(raw) when is_binary(raw) do
     raw
     |> URI.decode_query()

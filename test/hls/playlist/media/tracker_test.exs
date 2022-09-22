@@ -156,5 +156,8 @@ defmodule HLS.Playlist.Media.TrackerTest do
 
       :ok = Tracker.stop(pid)
     end
+
+    test "when playlist adds multiple segments, they are retriven in order" do
+    end
   end
 end
