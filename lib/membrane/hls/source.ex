@@ -165,6 +165,8 @@ defmodule Membrane.HLS.Source do
           is_warming_up: false
       }
 
+      Membrane.Logger.warn("Fulfill demand #{inspect tracker.demand}, giving #{inspect length(actions)}")
+
       {actions, tracker}
     end
   end
