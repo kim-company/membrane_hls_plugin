@@ -15,6 +15,8 @@ defmodule HLS.Playlist.Media.Tracker do
     defstruct [:ref, :target, :follower, started: false, next_seq: 0]
   end
 
+  def initial_live_buffer_size(), do: @max_initial_live_segments
+
   def start_link(storage = %Storage{}, opts \\ []) do
     GenServer.start_link(__MODULE__, storage, opts)
   end

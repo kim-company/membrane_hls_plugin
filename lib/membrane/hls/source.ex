@@ -32,7 +32,7 @@ defmodule Membrane.HLS.Source do
     {:ok, pid} = Tracker.start_link(state.storage)
     target = build_target(rendition)
     ref = Tracker.follow(pid, target)
-    config = %{tracking: ref, tracker: pid, queue: Qex.new(), queued: 0, closed: false}
+    config = %{tracking: ref, tracker: pid, queue: Qex.new(), demand: 0, is_warming_up: true}
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
     state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
@@ -48,18 +48,11 @@ defmodule Membrane.HLS.Source do
     {:ok, state}
   end
 
-  def handle_demand(pad, _size, :buffers, _ctx, state) do
+  def handle_demand(pad, size, :buffers, _ctx, state) do
     tracker = Map.fetch!(state.pad_to_tracker, pad)
-
-    if tracker.queued == 0 do
-      # Put the output pad on hold. As soon as the first packet is received,
-      # notify it to redemand.
-      {:ok, state}
-    else
-      {actions, tracker} = fulfill_demand(state.storage, pad, tracker)
-      state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-      {{:ok, actions}, state}
-    end
+    tracker = %{tracker | demand: tracker.demand + size}
+    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
+    {:ok, state}
   end
 
   @impl true
@@ -86,18 +79,16 @@ defmodule Membrane.HLS.Source do
     pad = Map.fetch!(state.ref_to_pad, ref)
     tracker = Map.fetch!(state.pad_to_tracker, pad)
 
-    queue = Qex.push(tracker.queue, segment)
-    queued = tracker.queued + 1
-    tracker = %{tracker | queue: queue, queued: queued}
+    data = HLS.Storage.get_segment!(state.storage, segment.uri)
+    action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
+
+    queue = Qex.push(tracker.queue, action)
+    tracker = %{tracker | queue: queue}
+
+    {actions, tracker} = fulfill_demand(tracker)
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    if tracker.queued == 1 do
-      # It means that the previous demand request was put on hold. Tell our
-      # output pad that we're ready to provide one more chunk.
-      {{:ok, [{:redemand, pad}]}, state}
-    else
-      {:ok, state}
-    end
+    {{:ok, actions}, state}
   end
 
   def handle_other({:start_of_track, _ref, _next_sequence}, _ctx, state) do
@@ -107,16 +98,14 @@ defmodule Membrane.HLS.Source do
   def handle_other({:end_of_track, ref}, _ctx, state) do
     pad = Map.fetch!(state.ref_to_pad, ref)
     tracker = Map.fetch!(state.pad_to_tracker, pad)
-    tracker = %{tracker | closed: true}
+
+    {actions, tracker} = fulfill_demand(tracker, true)
+    actions = actions ++ [{:end_of_stream, pad}]
+    #
+    # TODO: maybe closed and remove the tracker?
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    if tracker.queued == 0 do
-      # If the output pad was on hold it would not call re-demand and we won't
-      # have a chance to notify it.
-      {{:ok, [{:end_of_stream, pad}]}, state}
-    else
-      {:ok, state}
-    end
+    {{:ok, actions}, state}
   end
 
   # TODO
@@ -145,21 +134,38 @@ defmodule Membrane.HLS.Source do
   defp build_caps(rendition),
     do: raise(ArgumentError, "Unable to provide a proper cap for rendition #{inspect(rendition)}")
 
-  defp fulfill_demand(storage, pad, tracker) do
-    {segment, queue} = Qex.pop!(tracker.queue)
-    queued = tracker.queued - 1
-    tracker = %{tracker | queue: queue, queued: queued}
+  defp take_from_queue(queue, 0, acc), do: {Enum.reverse(acc), queue}
 
-    data = HLS.Storage.get_segment!(storage, segment.uri)
-    action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
+  defp take_from_queue(queue, size, acc) do
+    case Qex.pop(queue) do
+      {:empty, queue} -> take_from_queue(queue, 0, acc)
+      {{:value, item}, queue} -> take_from_queue(queue, size - 1, [item | acc])
+    end
+  end
 
-    actions =
-      cond do
-        queued > 0 -> [action, {:redemand, pad}]
-        tracker.closed -> [action, {:end_of_stream, pad}]
-        true -> [action]
-      end
+  defp fulfill_demand(tracker, flush_it \\ false)
 
+  defp fulfill_demand(tracker, true) do
+    {actions, queue} = take_from_queue(tracker.queue, Enum.count(tracker.queue), [])
+    tracker = %{tracker | queue: queue, demand: tracker.demand - length(actions)}
     {actions, tracker}
+  end
+
+  defp fulfill_demand(tracker, false) do
+    if tracker.is_warming_up and Enum.count(tracker.queue) < Tracker.initial_live_buffer_size() do
+      # Wait some segments before starting the fulfillment process.
+      {[], tracker}
+    else
+      {actions, queue} = take_from_queue(tracker.queue, tracker.demand, [])
+
+      tracker = %{
+        tracker
+        | queue: queue,
+          demand: tracker.demand - length(actions),
+          is_warming_up: false
+      }
+
+      {actions, tracker}
+    end
   end
 end
