@@ -10,6 +10,7 @@ defmodule HLS.Storage.HTTP do
     base_url = "#{uri.scheme}://#{uri.authority}#{Path.dirname(uri.path)}"
 
     middleware = [
+      Tesla.Middleware.FollowRedirects,
       {Tesla.Middleware.BaseUrl, base_url}
     ]
 
