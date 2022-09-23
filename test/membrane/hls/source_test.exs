@@ -9,7 +9,7 @@ defmodule Membrane.HLS.SourceTest do
   import Membrane.Testing.Assertions
 
   @master_playlist_path "./fixtures/mpeg-ts/stream.m3u8"
-  @store Storage.new(%Storage.FS{location: @master_playlist_path})
+  @store Storage.new(@master_playlist_path)
 
   defmodule Pipeline do
     use Membrane.Pipeline
@@ -84,7 +84,8 @@ defmodule Membrane.HLS.SourceTest do
         custom_args: %{
           storage: @store,
           stream_selector: fn stream -> stream.uri.path == stream_name <> ".m3u8" end
-        }
+        },
+        test_process: self()
       ]
 
       {:ok, pipeline} = Membrane.Testing.Pipeline.start_link(options)

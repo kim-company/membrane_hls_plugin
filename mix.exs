@@ -22,8 +22,9 @@ defmodule Membrane.HLS.MixProject do
   defp deps do
     [
       {:membrane_core, "~> 0.10.0"},
+      {:membrane_file_plugin, "~> 0.12.0", only: :test},
       {:tesla, "~> 1.4"},
-      {:hackney, "~> 1.17"},
+      {:hackney, "~> 1.17"}
       # {:dep_from_hexpm, "~> 0.3.0"},
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
     ]
