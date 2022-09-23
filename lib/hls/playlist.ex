@@ -29,9 +29,7 @@ defmodule HLS.Playlist do
     end
 
     data
-    # carriage return + line feed should be supported as well, see RFC
-    # 8216, 4.1
-    |> String.split("\n", trim: true)
+    |> String.split(~r/\R/, trim: true)
     |> Enum.reduce({[], 0, nil}, fn
       line, acc = {marshaled, n, nil} ->
         matching_unmarshaler =

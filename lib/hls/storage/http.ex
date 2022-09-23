@@ -18,9 +18,9 @@ defmodule HLS.Storage.HTTP do
   end
 
   @impl true
-  def get(%__MODULE__{url: url}) do
-    url
-    |> Tesla.get()
+  def get(%__MODULE__{client: client, url: url}) do
+    client
+    |> Tesla.get(url)
     |> handle_response()
   end
 
