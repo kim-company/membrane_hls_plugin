@@ -10,7 +10,10 @@ defmodule HLS.Storage.HTTP do
     base_url = "#{uri.scheme}://#{uri.authority}#{Path.dirname(uri.path)}"
 
     middleware = [
-      Tesla.Middleware.FollowRedirects,
+      # We do not want to follow redirects in the case of VT, because in that case the trailer
+      # of an incoming livestream would already start the streaming pipeline.
+      # This should be made configurable.
+      # Tesla.Middleware.FollowRedirects,
       {Tesla.Middleware.BaseUrl, base_url}
     ]
 
