@@ -15,16 +15,14 @@ defmodule HLS.Storage.HTTP do
       # streaming pipeline. This should be made configurable.
       # Tesla.Middleware.FollowRedirects,
       {Tesla.Middleware.Retry,
-       %{
-         delay: 100,
-         max_retries: 10,
-         max_delay: 1_000,
-         should_retry: fn
-           {:ok, %{status: status}} when status >= 400 and status <= 500 -> true
-           {:error, _} -> true
-           {:ok, _} -> false
-         end
-       }},
+       delay: 100,
+       max_retries: 10,
+       max_delay: 1_000,
+       should_retry: fn
+         {:ok, %{status: status}} when status >= 400 and status <= 500 -> true
+         {:error, _} -> true
+         {:ok, _} -> false
+       end},
       {Tesla.Middleware.BaseUrl, base_url}
     ]
 
