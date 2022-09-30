@@ -10,10 +10,21 @@ defmodule HLS.Storage.HTTP do
     base_url = "#{uri.scheme}://#{uri.authority}#{Path.dirname(uri.path)}"
 
     middleware = [
-      # We do not want to follow redirects in the case of VT, because in that case the trailer
-      # of an incoming livestream would already start the streaming pipeline.
-      # This should be made configurable.
+      # We do not want to follow redirects in the case of VT, because in that
+      # case the trailer of an incoming livestream would already start the
+      # streaming pipeline. This should be made configurable.
       # Tesla.Middleware.FollowRedirects,
+      {Tesla.Middleware.Retry,
+       %{
+         delay: 100,
+         max_retries: 10,
+         max_delay: 1_000,
+         should_retry: fn
+           {:ok, %{status: status}} when status >= 400 and status <= 500 -> true
+           {:error, _} -> true
+           {:ok, _} -> false
+         end
+       }},
       {Tesla.Middleware.BaseUrl, base_url}
     ]
 
