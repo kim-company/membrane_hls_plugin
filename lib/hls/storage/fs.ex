@@ -4,17 +4,14 @@ defmodule HLS.Storage.FS do
   @enforce_keys [:location]
   defstruct @enforce_keys ++ [:dirname, :basename]
 
-  @impl true
   def init(config = %__MODULE__{location: location}) do
     basename = Path.basename(location)
     dirname = Path.dirname(location)
     %__MODULE__{config | basename: basename, dirname: dirname}
   end
 
-  @impl true
   def get(%__MODULE__{dirname: dir, basename: manifest}), do: load([dir, manifest])
 
-  @impl true
   def get(%__MODULE__{dirname: dir}, %URI{path: rel}), do: load([dir, rel])
 
   defp load(path) when is_list(path) do

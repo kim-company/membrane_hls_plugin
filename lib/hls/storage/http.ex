@@ -2,18 +2,13 @@ defmodule HLS.Storage.HTTP do
   @behaviour HLS.Storage
 
   @enforce_keys [:url]
-  defstruct @enforce_keys ++ [:client]
+  defstruct @enforce_keys ++ [:client, follow_redirects?: false]
 
-  @impl true
   def init(config = %__MODULE__{url: url}) do
     uri = URI.parse(url)
     base_url = "#{uri.scheme}://#{uri.authority}#{Path.dirname(uri.path)}"
 
     middleware = [
-      # We do not want to follow redirects in the case of VT, because in that
-      # case the trailer of an incoming livestream would already start the
-      # streaming pipeline. This should be made configurable.
-      # Tesla.Middleware.FollowRedirects,
       {Tesla.Middleware.Retry,
        delay: 100,
        max_retries: 10,
@@ -24,19 +19,21 @@ defmodule HLS.Storage.HTTP do
          {:ok, _} -> false
        end},
       {Tesla.Middleware.BaseUrl, base_url}
-    ]
+    ] ++ if config.follow_redirects? do
+        [Tesla.Middleware.FollowRedirects]
+    else
+        []
+    end
 
     %__MODULE__{config | client: Tesla.client(middleware)}
   end
 
-  @impl true
   def get(%__MODULE__{client: client, url: url}) do
     client
     |> Tesla.get(url)
     |> handle_response()
   end
 
-  @impl true
   def get(%__MODULE__{client: client}, uri) do
     client
     |> Tesla.get(uri.path, query: decode_query(uri.query))
