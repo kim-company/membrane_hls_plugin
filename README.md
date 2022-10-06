@@ -6,6 +6,8 @@ alternative data sources. `FS` and `HTTP` adapters are implemented.
 The library contains two contexts: `Membrane.HLS` containing the actual plugin
 and the `HLS` module which neatly isolates that logic for reusage.
 
+This element is used in production.
+
 ## Usage
 Still not hex.pm. Can be used as github dependency though. Will become an hex
 package soon.
