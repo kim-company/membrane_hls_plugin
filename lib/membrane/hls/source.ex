@@ -116,26 +116,22 @@ defmodule Membrane.HLS.Source do
 
     pad = Map.fetch!(state.ref_to_pad, ref)
     tracker = Map.fetch!(state.pad_to_tracker, pad)
+    Tracker.stop(tracker.tracker)
     tracker = %{tracker | closed: true}
 
-    # TODO: maybe closed and remove the tracker?
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
     {{:ok, [{:redemand, pad}]}, state}
   end
 
-  # TODO
-  # @impl true
-  # def handle_prepared_to_stopped(_ctx, state) do
-  #   HLS.Tracker.stop(state.tracking)
-  #
-  #   state =
-  #     Enum.reduce([:tracking, :tracker, :queue, :queued, :closed], state, fn key, state ->
-  #       Map.delete(state, key)
-  #     end)
-  #
-  #   {:ok, state}
-  # end
+  @impl true
+  def handle_prepared_to_stopped(_ctx, state) do
+    Enum.each(state.pad_to_tracker, fn {_, %{tracker: pid, closed: closed}} ->
+      unless closed, do: Tracker.stop(pid)
+    end)
+
+    {:ok, %{state | pad_to_tracker: %{}, ref_to_pad: %{}}}
+  end
 
   defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
   defp build_target(%HLS.VariantStream{uri: uri}), do: uri
