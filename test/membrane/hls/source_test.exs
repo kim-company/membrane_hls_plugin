@@ -8,7 +8,7 @@ defmodule Membrane.HLS.SourceTest do
 
   import Membrane.Testing.Assertions
 
-  @master_playlist_path "./fixtures/mpeg-ts/stream.m3u8"
+  @master_playlist_path "./test/fixtures/mpeg-ts/stream.m3u8"
   @store Storage.new(@master_playlist_path)
 
   defmodule Pipeline do

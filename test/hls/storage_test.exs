@@ -6,7 +6,7 @@ defmodule HLS.StorageTest do
   alias HLS.Playlist.Master
   alias HLS.Playlist.Media
 
-  @master_playlist_path "./fixtures/mpeg-ts/stream.m3u8"
+  @master_playlist_path "./test/fixtures/mpeg-ts/stream.m3u8"
   @store Storage.new(%FS{location: @master_playlist_path})
 
   describe "Load playlist from disk" do

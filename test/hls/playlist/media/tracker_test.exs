@@ -6,7 +6,7 @@ defmodule HLS.Playlist.Media.TrackerTest do
   alias HLS.Storage
   alias HLS.Storage.FS
 
-  @master_playlist_path "./fixtures/mpeg-ts/stream.m3u8"
+  @master_playlist_path "./test/fixtures/mpeg-ts/stream.m3u8"
   @store Storage.new(%FS{location: @master_playlist_path})
 
   defmodule OneMoreMediaStorage do
