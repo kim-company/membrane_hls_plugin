@@ -1,16 +1,21 @@
 # Membrane HLS Plugin
 Plugin providing a `Membrane.HLS.Source` element for HTTP Live Streaming (HLS)
-playlist files. Provides an `HLS.Storage` abstraction that enables to develop
-alternative data sources. `FS` and `HTTP` adapters are implemented.
-
-The library contains two contexts: `Membrane.HLS` containing the actual plugin
-and the `HLS` module which neatly isolates that logic for reusage.
+playlist files.
 
 This element is used in production.
 
+## Installation
+```elixir
+def deps do
+  [
+    {:membrane_hls_plugin, github: "kim-company/membrane_hls_plugin"}
+  ]
+end
+```
 ## Usage
-Still not hex.pm. Can be used as github dependency though. Will become an hex
-package soon.
+1. Initialize the source with an .m3u8 URI
+2. The pipeline will receive a notification with the master playlist
+3. Extract the renditions you're interested in, use them as pad identifiers when attaching a new pad.
 
 ## Gotchas
 ### On LFS (if tests are failing
