@@ -23,8 +23,7 @@ defmodule Membrane.HLS.MixProject do
     [
       {:membrane_core, "~> 0.10.0"},
       {:membrane_file_plugin, "~> 0.12.0", only: :test},
-      {:tesla, "~> 1.4"},
-      {:hackney, "~> 1.17"}
+      {:kim_hls, github: "kim-company/kim_hls"}
     ]
   end
 end
