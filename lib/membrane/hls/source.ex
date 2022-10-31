@@ -99,7 +99,7 @@ defmodule Membrane.HLS.Source do
 
     case HLS.Storage.get_segment(state.storage, segment.uri) do
       {:error, message} ->
-        Membrane.Logger.warn("HLS could not get segment #{inspect segment.uri}: #{inspect error}")
+        Membrane.Logger.warn("HLS could not get segment #{inspect segment.uri}: #{inspect message}")
         {{:ok, [{:redemand, pad}]}, state}
         
       {:ok, data} ->
