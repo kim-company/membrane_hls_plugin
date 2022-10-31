@@ -97,14 +97,20 @@ defmodule Membrane.HLS.Source do
     pad = Map.fetch!(state.ref_to_pad, ref)
     tracker = Map.fetch!(state.pad_to_tracker, pad)
 
-    data = HLS.Storage.get_segment!(state.storage, segment.uri)
-    action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
+    case HLS.Storage.get_segment(state.storage, segment.uri) do
+      {:error, message} ->
+        Membrane.Logger.warn("HLS could not get segment #{inspect segment.uri}: #{inspect error}")
+        {{:ok, [{:redemand, pad}]}, state}
+        
+      {:ok, data} ->
+        action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
 
-    queue = Q.push(tracker.queue, action)
-    tracker = %{tracker | queue: queue}
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
+        queue = Q.push(tracker.queue, action)
+        tracker = %{tracker | queue: queue}
+        state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    {{:ok, [{:redemand, pad}]}, state}
+        {{:ok, [{:redemand, pad}]}, state}
+    end
   end
 
   def handle_other({:start_of_track, _ref, _next_sequence}, _ctx, state) do
