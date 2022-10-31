@@ -10,7 +10,7 @@ defmodule Membrane.HLS.Source do
   require Membrane.Logger
 
   def_output_pad(:output,
-    mode: :pull,
+    mode: :push,
     availability: :on_request,
     caps: [Format.PackedAudio, Format.WebVTT, Format.MPEG]
   )
@@ -32,7 +32,7 @@ defmodule Membrane.HLS.Source do
     {:ok, pid} = Tracker.start_link(state.storage)
     target = build_target(rendition)
     ref = Tracker.follow(pid, target)
-    config = %{tracking: ref, tracker: pid, queue: Q.new("hls-#{rendition.uri.path}"), closed: false}
+    config = %{tracking: ref, tracker: pid, closed: false}
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
     state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
@@ -46,31 +46,6 @@ defmodule Membrane.HLS.Source do
   def handle_stopped_to_prepared(_ctx, state) do
     send(self(), :check_master_playlist)
     {:ok, state}
-  end
-
-  def handle_demand(pad, size, :buffers, _ctx, state) do
-    tracker = Map.fetch!(state.pad_to_tracker, pad)
-
-    size =
-      if tracker.closed do
-        tracker.queue.count
-      else
-        size
-      end
-
-    {actions, queue} = Q.take(tracker.queue, size)
-
-    actions =
-      if tracker.closed do
-        actions ++ [{:end_of_stream, pad}]
-      else
-        actions
-      end
-
-    tracker = %{tracker | queue: queue}
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-
-    {{:ok, actions}, state}
   end
 
   @impl true
@@ -95,21 +70,14 @@ defmodule Membrane.HLS.Source do
     Membrane.Logger.debug("HLS segment received on #{inspect(ref)}: #{inspect(segment)}")
 
     pad = Map.fetch!(state.ref_to_pad, ref)
-    tracker = Map.fetch!(state.pad_to_tracker, pad)
 
     case HLS.Storage.get_segment(state.storage, segment.uri) do
       {:error, message} ->
         Membrane.Logger.warn("HLS could not get segment #{inspect segment.uri}: #{inspect message}")
-        {{:ok, [{:redemand, pad}]}, state}
+        {:ok, state}
         
       {:ok, data} ->
-        action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
-
-        queue = Q.push(tracker.queue, action)
-        tracker = %{tracker | queue: queue}
-        state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-
-        {{:ok, [{:redemand, pad}]}, state}
+        {{:ok, [{:buffer, {pad, %Buffer{payload: data, metadata: segment}}}]}, state}
     end
   end
 
@@ -124,10 +92,9 @@ defmodule Membrane.HLS.Source do
     tracker = Map.fetch!(state.pad_to_tracker, pad)
     Tracker.stop(tracker.tracker)
     tracker = %{tracker | closed: true}
-
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    {{:ok, [{:redemand, pad}]}, state}
+    {{:ok, [{:end_of_stream, pad}]}, state}
   end
 
   @impl true
