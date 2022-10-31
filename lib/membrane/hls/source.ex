@@ -5,6 +5,7 @@ defmodule Membrane.HLS.Source do
   alias HLS.Playlist.Media.Tracker
   alias Membrane.Buffer
   alias Membrane.HLS.Format
+  alias Membrane.HLS.TaskSupervisor
 
   @master_check_retry_interval_ms 1_000
   require Membrane.Logger
@@ -189,7 +190,12 @@ defmodule Membrane.HLS.Source do
     case Q.pop(tracker.pending) do
       {{:value, segment}, queue} ->
         Membrane.Logger.debug("Starting download of segment: #{inspect(segment)}")
-        task = Task.async(HLS.Storage, :get_segment, [storage, segment.uri])
+
+        task =
+          Task.Supervisor.async_nolink(TaskSupervisor, fn ->
+            HLS.Storage.get_segment(storage, segment.uri)
+          end)
+
         %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}
 
       {:empty, _q} ->
