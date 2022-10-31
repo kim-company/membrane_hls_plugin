@@ -32,7 +32,7 @@ defmodule Membrane.HLS.Source do
     {:ok, pid} = Tracker.start_link(state.storage)
     target = build_target(rendition)
     ref = Tracker.follow(pid, target)
-    config = %{tracking: ref, tracker: pid, queue: Q.new("hls"), closed: false}
+    config = %{tracking: ref, tracker: pid, queue: Q.new("hls-#{inspect rendition.name}"), closed: false}
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
     state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
