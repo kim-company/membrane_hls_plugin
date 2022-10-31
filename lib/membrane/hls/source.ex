@@ -32,7 +32,7 @@ defmodule Membrane.HLS.Source do
     {:ok, pid} = Tracker.start_link(state.storage)
     target = build_target(rendition)
     ref = Tracker.follow(pid, target)
-    config = %{tracking: ref, tracker: pid, queue: Qex.new(), closed: false}
+    config = %{tracking: ref, tracker: pid, queue: Q.new("hls"), closed: false}
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
     state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
@@ -53,12 +53,12 @@ defmodule Membrane.HLS.Source do
 
     size =
       if tracker.closed do
-        Enum.count(tracker.queue)
+        tracker.queue.count
       else
         size
       end
 
-    {actions, queue} = take_from_queue(tracker.queue, size, [])
+    {actions, queue} = Q.take(tracker.queue, size)
 
     actions =
       if tracker.closed do
@@ -100,7 +100,7 @@ defmodule Membrane.HLS.Source do
     data = HLS.Storage.get_segment!(state.storage, segment.uri)
     action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
 
-    queue = Qex.push(tracker.queue, action)
+    queue = Q.push(tracker.queue, action)
     tracker = %{tracker | queue: queue}
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
@@ -145,13 +145,4 @@ defmodule Membrane.HLS.Source do
 
   defp build_caps(rendition),
     do: raise(ArgumentError, "Unable to provide a proper cap for rendition #{inspect(rendition)}")
-
-  defp take_from_queue(queue, 0, acc), do: {Enum.reverse(acc), queue}
-
-  defp take_from_queue(queue, size, acc) do
-    case Qex.pop(queue) do
-      {:empty, queue} -> take_from_queue(queue, 0, acc)
-      {{:value, item}, queue} -> take_from_queue(queue, size - 1, [item | acc])
-    end
-  end
 end
