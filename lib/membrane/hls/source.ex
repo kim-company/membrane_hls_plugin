@@ -38,7 +38,7 @@ defmodule Membrane.HLS.Source do
       tracker: pid,
       ready: Q.new("hls-ready-#{rendition.uri.path}"),
       pending: Q.new("hls-pending-#{rendition.uri.path}"),
-      task_ref: nil,
+      download: nil,
       closed: false
     }
 
@@ -62,7 +62,7 @@ defmodule Membrane.HLS.Source do
 
     actions =
       if tracker.closed and Q.empty?(ready) and Q.empty?(tracker.pending) and
-           is_nil(tracker.task_ref) do
+           is_nil(tracker.download) do
         actions ++ [{:end_of_stream, pad}]
       else
         actions
@@ -112,38 +112,37 @@ defmodule Membrane.HLS.Source do
     Process.demonitor(task_ref, [:flush])
 
     {pad, tracker} = tracker_by_task_ref!(state.pad_to_tracker, task_ref)
+    segment = tracker.download.segment
 
     tracker =
-      tracker
-      |> Map.replace!(:task_ref, nil)
-      |> start_download(state.storage)
+      case result do
+        {:ok, data} ->
+          action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
+          ready = Q.push(tracker.ready, action)
+          %{tracker | ready: ready, download: nil}
 
-    case result do
-      {:ok, data} ->
-        action = {:buffer, {pad, %Buffer{payload: data}}}
+        {:error, message} ->
+          Membrane.Logger.warn(
+            "HLS could not get segment #{inspect(segment.uri)}: #{inspect(message)}"
+          )
 
-        ready = Q.push(tracker.ready, action)
-        tracker = %{tracker | ready: ready}
-        state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
+          %{tracker | download: nil}
+      end
 
-        {{:ok, [{:redemand, pad}]}, state}
-
-      {:error, message} ->
-        Membrane.Logger.warn("HLS could not get segment: #{inspect(message)}")
-
-        state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-        {{:ok, [{:redemand, pad}]}, state}
-    end
+    tracker = start_download(tracker, state.storage)
+    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
+    {{:ok, [{:redemand, pad}]}, state}
   end
 
   def handle_other({:DOWN, task_ref, _, _, reason}, _ctx, state) do
-    Membrane.Logger.warn("HLS could not get segment: #{inspect(reason)}")
-
     {pad, tracker} = tracker_by_task_ref!(state.pad_to_tracker, task_ref)
+    segment = tracker.download.segment
+
+    Membrane.Logger.warn("HLS could not get segment #{inspect(segment.uri)}: #{inspect(reason)}")
 
     tracker =
       tracker
-      |> Map.replace!(:task_ref, nil)
+      |> Map.replace!(:download, nil)
       |> start_download(state.storage)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
@@ -180,18 +179,18 @@ defmodule Membrane.HLS.Source do
   defp tracker_by_task_ref!(pad_to_tracker, task_ref) do
     tracker =
       Enum.find(pad_to_tracker, fn {_pad, tracker} ->
-        tracker.task_ref == task_ref
+        tracker.download != nil and tracker.download.task_ref == task_ref
       end)
 
     tracker || raise "tracker with task reference #{inspect(task_ref)} not found"
   end
 
-  defp start_download(%{task_ref: nil} = tracker, storage) do
+  defp start_download(%{download: nil} = tracker, storage) do
     case Q.pop(tracker.pending) do
       {{:value, segment}, queue} ->
         Membrane.Logger.debug("Starting download of segment: #{inspect(segment)}")
         task = Task.async(HLS.Storage, :get_segment, [storage, segment.uri])
-        %{tracker | pending: queue, task_ref: task.ref}
+        %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}
 
       {:empty, _q} ->
         tracker
