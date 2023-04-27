@@ -13,7 +13,7 @@ defmodule Membrane.HLS.Source do
   def_output_pad(:output,
     mode: :pull,
     availability: :on_request,
-    caps: [Format.PackedAudio, Format.WebVTT, Format.MPEG]
+    accepted_format: any_of(Format.PackedAudio, Format.WebVTT, Format.MPEG)
   )
 
   def_options(
@@ -24,8 +24,8 @@ defmodule Membrane.HLS.Source do
   )
 
   @impl true
-  def handle_init(options) do
-    {:ok, %{storage: options.storage, pad_to_tracker: %{}, ref_to_pad: %{}}}
+  def handle_init(_ctx, options) do
+    {[], %{storage: options.storage, pad_to_tracker: %{}, ref_to_pad: %{}}}
   end
 
   @impl true
@@ -46,17 +46,16 @@ defmodule Membrane.HLS.Source do
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
     state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
 
-    caps = build_caps(rendition)
-
-    {{:ok, [caps: {pad, caps}]}, state}
+    {[{:stream_format, {pad, build_stream_format(rendition)}}], state}
   end
 
   @impl true
-  def handle_stopped_to_prepared(_ctx, state) do
+  def handle_playing(_ctx, state) do
     send(self(), :check_master_playlist)
-    {:ok, state}
+    {[], state}
   end
 
+  @impl true
   def handle_demand(pad, size, :buffers, _ctx, state) do
     tracker = Map.fetch!(state.pad_to_tracker, pad)
     {actions, ready} = Q.take(tracker.ready, size)
@@ -72,14 +71,14 @@ defmodule Membrane.HLS.Source do
     tracker = %{tracker | ready: ready}
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    {{:ok, actions}, state}
+    {actions, state}
   end
 
   @impl true
-  def handle_other(:check_master_playlist, _ctx, state = %{storage: store}) do
+  def handle_info(:check_master_playlist, _ctx, state = %{storage: store}) do
     case Storage.get_master_playlist(store) do
       {:ok, playlist} ->
-        {{:ok, [notify: {:hls_master_playlist, playlist}]}, state}
+        {[{:notify_parent, {:hls_master_playlist, playlist}}], state}
 
       {:error, reason} ->
         Membrane.Logger.debug("Master playlist check failed: #{inspect(reason)}")
@@ -89,11 +88,11 @@ defmodule Membrane.HLS.Source do
         )
 
         Process.send_after(self(), :check_master_playlist, @master_check_retry_interval_ms)
-        {:ok, state}
+        {[], state}
     end
   end
 
-  def handle_other({:segment, ref, segment}, _ctx, state) do
+  def handle_info({:segment, ref, segment}, _ctx, state) do
     Membrane.Logger.debug("HLS segment received on #{inspect(ref)}: #{inspect(segment)}")
 
     pad = Map.fetch!(state.ref_to_pad, ref)
@@ -105,10 +104,10 @@ defmodule Membrane.HLS.Source do
       |> start_download(state.storage)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-    {:ok, state}
+    {[], state}
   end
 
-  def handle_other({task_ref, result}, _ctx, state) when is_reference(task_ref) do
+  def handle_info({task_ref, result}, _ctx, state) when is_reference(task_ref) do
     # The task succeed so we can cancel the monitoring and discard the DOWN message
     Process.demonitor(task_ref, [:flush])
 
@@ -132,10 +131,10 @@ defmodule Membrane.HLS.Source do
 
     tracker = start_download(tracker, state.storage)
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-    {{:ok, [{:redemand, pad}]}, state}
+    {[{:redemand, pad}], state}
   end
 
-  def handle_other({:DOWN, task_ref, _, _, reason}, _ctx, state) do
+  def handle_info({:DOWN, task_ref, _, _, reason}, _ctx, state) do
     {pad, tracker} = tracker_by_task_ref!(state.pad_to_tracker, task_ref)
     segment = tracker.download.segment
 
@@ -148,14 +147,14 @@ defmodule Membrane.HLS.Source do
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    {{:ok, [{:redemand, pad}]}, state}
+    {[{:redemand, pad}], state}
   end
 
-  def handle_other({:start_of_track, _ref, _next_sequence}, _ctx, state) do
-    {:ok, state}
+  def handle_info({:start_of_track, _ref, _next_sequence}, _ctx, state) do
+    {[], state}
   end
 
-  def handle_other({:end_of_track, ref}, _ctx, state) do
+  def handle_info({:end_of_track, ref}, _ctx, state) do
     Membrane.Logger.debug("HLS end_of_track received on #{inspect(ref)}")
 
     pad = Map.fetch!(state.ref_to_pad, ref)
@@ -165,16 +164,16 @@ defmodule Membrane.HLS.Source do
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
-    {{:ok, [{:redemand, pad}]}, state}
+    {[{:redemand, pad}], state}
   end
 
   @impl true
-  def handle_prepared_to_stopped(_ctx, state) do
+  def handle_terminate_request(_ctx, state) do
     Enum.each(state.pad_to_tracker, fn {_, %{tracker: pid, closed: closed}} ->
       unless closed, do: Tracker.stop(pid)
     end)
 
-    {:ok, %{state | pad_to_tracker: %{}, ref_to_pad: %{}}}
+    {[], %{state | pad_to_tracker: %{}, ref_to_pad: %{}}}
   end
 
   defp tracker_by_task_ref!(pad_to_tracker, task_ref) do
@@ -208,13 +207,13 @@ defmodule Membrane.HLS.Source do
   defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
   defp build_target(%HLS.VariantStream{uri: uri}), do: uri
 
-  defp build_caps(%HLS.VariantStream{codecs: codecs}), do: %Format.MPEG{codecs: codecs}
+  defp build_stream_format(%HLS.VariantStream{codecs: codecs}), do: %Format.MPEG{codecs: codecs}
 
-  defp build_caps(%HLS.AlternativeRendition{type: :subtitles, language: lang}),
+  defp build_stream_format(%HLS.AlternativeRendition{type: :subtitles, language: lang}),
     do: %Format.WebVTT{language: lang}
 
-  defp build_caps(%HLS.AlternativeRendition{type: :audio}), do: %Format.PackedAudio{}
+  defp build_stream_format(%HLS.AlternativeRendition{type: :audio}), do: %Format.PackedAudio{}
 
-  defp build_caps(rendition),
+  defp build_stream_format(rendition),
     do: raise(ArgumentError, "Unable to provide a proper cap for rendition #{inspect(rendition)}")
 end

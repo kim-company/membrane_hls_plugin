@@ -15,22 +15,15 @@ defmodule Membrane.HLS.SourceTest do
     use Membrane.Pipeline
 
     @impl true
-    def handle_init(opts = %{storage: storage}) do
-      elements = [
-        source: %Source{storage: storage}
+    def handle_init(_ctx, opts = %{storage: storage}) do
+      structure = [
+        child(:source, %Source{storage: storage})
       ]
 
-      links = []
-
-      spec = %ParentSpec{
-        children: elements,
-        links: links
-      }
-
-      {{:ok, spec: spec, playback: :playing}, opts}
+      {[{:spec, structure}, {:playback, :playing}], opts}
     end
 
-    def handle_notification({:hls_master_playlist, master}, :source, _ctx, state) do
+    def handle_child_notification({:hls_master_playlist, master}, :source, _ctx, state) do
       stream =
         master
         |> Master.variant_streams()
@@ -38,25 +31,16 @@ defmodule Membrane.HLS.SourceTest do
 
       case stream do
         nil ->
-          {:ok, state}
+          {[], state}
 
         stream ->
-          elements = [
-            sink: Membrane.Testing.Sink
-          ]
-
-          links = [
-            link(:source)
+          structure = [
+            get_child(:source)
             |> via_out(Pad.ref(:output, {:rendition, stream}))
-            |> to(:sink)
+            |> child(:sink, Membrane.Testing.Sink)
           ]
 
-          spec = %ParentSpec{
-            children: elements,
-            links: links
-          }
-
-          {{:ok, spec: spec}, state}
+          {[{:spec, structure}], state}
       end
     end
   end
@@ -71,7 +55,7 @@ defmodule Membrane.HLS.SourceTest do
         }
       ]
 
-      {:ok, pipeline} = Membrane.Testing.Pipeline.start_link(options)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
       assert_pipeline_notified(pipeline, :source, {:hls_master_playlist, %Master{}})
       Membrane.Testing.Pipeline.terminate(pipeline, blocking?: true)
     end
@@ -88,10 +72,10 @@ defmodule Membrane.HLS.SourceTest do
         test_process: self()
       ]
 
-      {:ok, pipeline} = Membrane.Testing.Pipeline.start_link(options)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
 
       assert_start_of_stream(pipeline, :sink)
-      assert_sink_caps(pipeline, :sink, %Membrane.HLS.Format.MPEG{})
+      assert_sink_stream_format(pipeline, :sink, %Membrane.HLS.Format.MPEG{})
 
       # Asserting that each chunks in the selected playlist is seen by the sink
       base_dir = Path.join([Path.dirname(@master_playlist_path), stream_name, "00000"])
