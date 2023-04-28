@@ -3,6 +3,8 @@ defmodule Membrane.HLS.SinkTest do
 
   alias HLS.Storage
   alias HLS.Playlist.Media
+  alias Membrane.Buffer
+  alias HLS.Playlist
 
   defmodule Pipeline do
     use Membrane.Pipeline
@@ -28,49 +30,60 @@ defmodule Membrane.HLS.SinkTest do
     end
   end
 
+  def buffer_generator(buffers, size) do
+    {buffers, rest} = Enum.split(buffers, size)
+
+    if Enum.empty?(buffers) do
+      {[end_of_stream: :output], rest}
+    else
+      buffer_actions = [buffer: {:output, buffers}]
+
+      actions =
+        if Enum.empty?(rest) do
+          buffer_actions ++ [end_of_stream: :output]
+        else
+          buffer_actions
+        end
+
+      {actions, rest}
+    end
+  end
+
   describe "hls sink" do
     test "works with one segment" do
       storage = %Storage{driver: %Support.TestingStorage{owner: self()}}
-      playlist_uri = URI.new!("media.m3u8")
-
-      generator = fn state = {buffers_left, _last_pts, _buffer_duration}, size ->
-        produce = min(buffers_left, size)
-
-        if produce <= 0 do
-          [{:output, :end_of_stream}]
-        else
-          {buffers, state} =
-            Enum.map_reduce(Range.new(1, produce), state, fn _, {buffers_left, from, duration} ->
-              {%Membrane.Buffer{
-                 pts: from,
-                 metadata: %{duration: duration},
-                 payload: <<>>
-               }, {buffers_left - 1, from + duration, duration}}
-            end)
-
-          {[{:buffer, {:output, buffers}}], state}
-        end
-      end
-
-      target_segment_duration_seconds = 1
-      buffer_duration = Membrane.Time.seconds(target_segment_duration_seconds)
+      playlist_uri = URI.new!("s3://bucket/media.m3u8")
 
       options = [
         module: Pipeline,
         custom_args: %{
           storage: storage,
           playlist: %Media{
-            target_segment_duration: target_segment_duration_seconds,
+            target_segment_duration: 1,
             uri: playlist_uri
           },
-          output: {{2, Membrane.Time.seconds(0), buffer_duration}, generator}
+          output:
+            {[
+               %Buffer{
+                 payload: "a",
+                 pts: 0,
+                 metadata: %{duration: Membrane.Time.milliseconds(1_500)}
+               }
+             ], &__MODULE__.buffer_generator/2}
         },
         test_process: self()
       ]
 
       _pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
-      assert_receive({:put, ^playlist_uri, _data}, 2_000)
-      assert_receive({:put, %URI{path: "media/" <> _}, _data}, 2_000)
+
+      assert_receive({:put, ^playlist_uri, _data}, 1_000)
+      segment_uri = URI.new!("s3://bucket/media/00000.vtt")
+      assert_receive({:put, ^segment_uri, "a"}, 1_000)
+
+      # Assertion on end-of-stream
+      assert_receive({:put, ^playlist_uri, payload}, 1_000)
+      playlist = %Media{}
+      assert %Media{finished: true} = Playlist.unmarshal(payload, playlist)
     end
   end
 end

@@ -3,8 +3,8 @@ defmodule Membrane.HLS.Sink do
   alias Membrane.Buffer
   alias Membrane.HLS.Format
   alias HLS.Playlist.Media
-  alias HLS.Segment
-  alias HLS.Storage
+  alias HLS.{Storage, Playlist}
+  alias HLS.Playlist.Media.Builder
 
   require Membrane.Logger
 
@@ -37,99 +37,46 @@ defmodule Membrane.HLS.Sink do
      %{
        storage: opts.storage,
        playlist: opts.playlist,
-       formatter: opts.segment_formatter,
-       extension: "",
-       state: :syncing,
-       acc: []
+       formatter: opts.segment_formatter
      }}
   end
 
-  def handle_stream_format(_pad, %Format.WebVTT{}, _ctx, state) do
-    {[], %{state | extension: ".vtt"}}
-  end
+  def handle_stream_format(_pad, %Format.WebVTT{}, _ctx, state = %{playlist: playlist}) do
+    state =
+      state
+      |> Map.put(:builder, Builder.new(playlist, ".vtt"))
+      |> Map.take([:builder, :storage, :formatter])
 
-  def handle_end_of_stream(_pad, _ctx, state = %{acc: []}) do
     {[], state}
   end
 
   def handle_end_of_stream(
         _pad,
         _ctx,
-        state = %{acc: acc, playlist: playlist, formatter: formatter, storage: storage}
+        state = %{builder: builder}
       ) do
-    %Media{uri: playlist_uri, segments_reversed: [last_segment | _]} = playlist
+    %{state | builder: Builder.flush(builder)}
+    |> take_and_upload_segments()
+    |> upload_playlist()
 
-    payload =
-      acc
-      |> Enum.reverse()
-      |> formatter.()
-
-    Membrane.Logger.debug(
-      "Uploading payload #{byte_size(payload)} to #{inspect(last_segment.uri)}"
-    )
-
-    Membrane.Logger.debug("Uploading playlist to #{inspect(playlist.uri)}")
-
-    # TODO: upload payload to URI
-    # TODO: upload playlist!
-    Storage.put_segment(storage, last_segment, payload)
-    Storage.put(storage, playlist_uri, HLS.Playlist.marshal(playlist))
-
-    {[], %{state | acc: []}}
-  end
-
-  def handle_write(
-        pad,
-        buffer = %Buffer{pts: pts},
-        ctx,
-        state = %{state: :syncing, playlist: playlist, extension: extension}
-      ) do
-    playlist = Media.generate_missing_segments(playlist, convert_time_to_seconds(pts), extension)
-    handle_write(pad, buffer, ctx, %{state | state: :operational, playlist: playlist})
+    {[], state}
   end
 
   def handle_write(
         _pad,
-        buffer = %Buffer{pts: pts},
+        %Buffer{pts: pts, payload: payload, metadata: %{duration: duration}},
         _ctx,
-        state = %{
-          playlist: playlist,
-          acc: acc,
-          formatter: formatter,
-          extension: extension,
-          storage: storage
-        }
+        state = %{builder: builder}
       ) do
-    %Media{uri: playlist_uri, segments_reversed: [last_segment | _]} = playlist
-    %Segment{from: from, duration: duration} = last_segment
-    playback_offset = from + duration
+    from = convert_time_to_seconds(pts)
+    timed_payload = %{from: from, to: from + convert_time_to_seconds(duration), payload: payload}
 
-    if convert_time_to_seconds(pts) >= playback_offset do
-      # we're ready to ship a segment!
-      payload =
-        acc
-        |> Enum.reverse()
-        |> formatter.()
+    state =
+      %{state | builder: Builder.fit(builder, timed_payload)}
+      |> take_and_upload_segments()
+      |> upload_playlist()
 
-      Membrane.Logger.debug(
-        "Uploading payload #{byte_size(payload)} to #{inspect(last_segment.uri)}"
-      )
-
-      Membrane.Logger.debug("Uploading playlist to #{inspect(playlist.uri)}")
-
-      # TODO: upload payload to URI
-      # TODO: upload playlist!
-      Storage.put_segment(storage, last_segment, payload)
-      Storage.put(storage, playlist_uri, HLS.Playlist.marshal(playlist))
-
-      playlist =
-        Media.generate_missing_segments(playlist, convert_time_to_seconds(pts), extension)
-
-      {[], %{state | playlist: playlist, acc: [buffer]}}
-    else
-      # accumulate!
-      {[], %{state | acc: [buffer | acc]}}
-    end
+    {[], state}
   end
 
   def default_formatter(buffers) do
@@ -138,9 +85,57 @@ defmodule Membrane.HLS.Sink do
     |> Enum.join()
   end
 
+  defp take_and_upload_segments(
+         state = %{builder: builder, formatter: formatter, storage: storage}
+       ) do
+    {uploadables, builder} = Builder.take_uploadables(builder)
+
+    uploadables
+    |> Enum.map(fn %{uri: uri, payload: payloads} ->
+      payload =
+        payloads
+        |> Enum.map(fn %{from: from, to: to, payload: payload} ->
+          pts = convert_seconds_to_time(from)
+
+          %Buffer{
+            pts: pts,
+            payload: payload,
+            metadata: %{
+              duration: convert_seconds_to_time(to) - pts
+            }
+          }
+        end)
+        |> formatter.()
+
+      %{uri: uri, payload: payload}
+    end)
+    |> Enum.each(fn %{uri: uri, payload: payload} ->
+      Membrane.Logger.debug("Uploading payload #{byte_size(payload)} to #{inspect(uri)}")
+
+      Storage.put(storage, uri, payload)
+    end)
+
+    %{state | builder: builder}
+  end
+
+  defp upload_playlist(state = %{builder: builder, storage: storage}) do
+    # Upload the playlist
+    playlist = %Media{uri: uri} = Builder.playlist(builder)
+    payload = Playlist.marshal(playlist)
+    Membrane.Logger.debug("Uploading playlist to #{inspect(uri)}")
+    Storage.put(storage, uri, payload)
+    state
+  end
+
   defp convert_time_to_seconds(time) do
     time
     |> Membrane.Time.as_seconds()
     |> Ratio.to_float()
+  end
+
+  defp convert_seconds_to_time(seconds) do
+    (seconds * 1_000_000_000)
+    |> trunc()
+    |> Membrane.Time.nanoseconds()
   end
 end
