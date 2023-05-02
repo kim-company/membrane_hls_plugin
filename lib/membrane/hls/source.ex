@@ -1,7 +1,7 @@
 defmodule Membrane.HLS.Source do
   use Membrane.Source
 
-  alias HLS.Storage
+  alias HLS.Reader
   alias HLS.Playlist.Media.Tracker
   alias Membrane.Buffer
   alias Membrane.HLS.Format
@@ -17,20 +17,20 @@ defmodule Membrane.HLS.Source do
   )
 
   def_options(
-    storage: [
-      spec: HLS.Storage.t(),
-      description: "HLS.Storage instance pointing to the target HLS playlist"
+    reader: [
+      spec: HLS.Reader.t(),
+      description: "HLS.Reader instance pointing to the target HLS playlist"
     ]
   )
 
   @impl true
   def handle_init(_ctx, options) do
-    {[], %{storage: options.storage, pad_to_tracker: %{}, ref_to_pad: %{}}}
+    {[], %{reader: options.reader, pad_to_tracker: %{}, ref_to_pad: %{}}}
   end
 
   @impl true
   def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _, state) do
-    {:ok, pid} = Tracker.start_link(state.storage)
+    {:ok, pid} = Tracker.start_link(state.reader)
     target = build_target(rendition)
     ref = Tracker.follow(pid, target)
 
@@ -75,8 +75,8 @@ defmodule Membrane.HLS.Source do
   end
 
   @impl true
-  def handle_info(:check_master_playlist, _ctx, state = %{storage: store}) do
-    case Storage.get_master_playlist(store) do
+  def handle_info(:check_master_playlist, _ctx, state = %{reader: store}) do
+    case Reader.read_master_playlist(store) do
       {:ok, playlist} ->
         {[{:notify_parent, {:hls_master_playlist, playlist}}], state}
 
@@ -101,7 +101,7 @@ defmodule Membrane.HLS.Source do
     tracker =
       tracker
       |> Map.update!(:pending, &Q.push(&1, segment))
-      |> start_download(state.storage)
+      |> start_download(state.reader)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
     {[], state}
@@ -129,7 +129,7 @@ defmodule Membrane.HLS.Source do
           %{tracker | download: nil}
       end
 
-    tracker = start_download(tracker, state.storage)
+    tracker = start_download(tracker, state.reader)
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
     {[{:redemand, pad}], state}
   end
@@ -143,7 +143,7 @@ defmodule Membrane.HLS.Source do
     tracker =
       tracker
       |> Map.replace!(:download, nil)
-      |> start_download(state.storage)
+      |> start_download(state.reader)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
@@ -185,14 +185,14 @@ defmodule Membrane.HLS.Source do
     tracker || raise "tracker with task reference #{inspect(task_ref)} not found"
   end
 
-  defp start_download(%{download: nil} = tracker, storage) do
+  defp start_download(%{download: nil} = tracker, reader) do
     case Q.pop(tracker.pending) do
       {{:value, segment}, queue} ->
         Membrane.Logger.debug("Starting download of segment: #{inspect(segment)}")
 
         task =
           Task.Supervisor.async_nolink(TaskSupervisor, fn ->
-            HLS.Storage.get_segment(storage, segment.uri)
+            HLS.Reader.read_segment(reader, segment.uri)
           end)
 
         %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}
@@ -202,7 +202,7 @@ defmodule Membrane.HLS.Source do
     end
   end
 
-  defp start_download(tracker, _storage), do: tracker
+  defp start_download(tracker, _reader), do: tracker
 
   defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
   defp build_target(%HLS.VariantStream{uri: uri}), do: uri

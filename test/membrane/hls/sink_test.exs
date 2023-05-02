@@ -1,7 +1,6 @@
 defmodule Membrane.HLS.SinkTest do
   use ExUnit.Case
 
-  alias HLS.Storage
   alias HLS.Playlist.Media
   alias Membrane.Buffer
   alias HLS.Playlist
@@ -11,7 +10,7 @@ defmodule Membrane.HLS.SinkTest do
 
     @impl true
     def handle_init(_ctx, %{
-          storage: storage,
+          writer: writer,
           playlist: playlist,
           output: output
         }) do
@@ -21,7 +20,7 @@ defmodule Membrane.HLS.SinkTest do
           stream_format: %Membrane.HLS.Format.WebVTT{language: "en-US"}
         })
         |> child(:sink, %Membrane.HLS.Sink{
-          storage: storage,
+          writer: writer,
           playlist: playlist
         })
       ]
@@ -51,13 +50,13 @@ defmodule Membrane.HLS.SinkTest do
 
   describe "hls sink" do
     test "works with one segment" do
-      storage = %Storage{driver: %Support.TestingStorage{owner: self()}}
+      writer = %Support.TestingStorage{owner: self()}
       playlist_uri = URI.new!("s3://bucket/media.m3u8")
 
       options = [
         module: Pipeline,
         custom_args: %{
-          storage: storage,
+          writer: writer,
           playlist: %Media{
             target_segment_duration: 1,
             uri: playlist_uri
@@ -76,12 +75,12 @@ defmodule Membrane.HLS.SinkTest do
 
       _pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
 
-      assert_receive({:put, ^playlist_uri, _data}, 1_000)
+      assert_receive({:write, ^playlist_uri, _data}, 1_000)
       segment_uri = URI.new!("s3://bucket/media/00000.vtt")
-      assert_receive({:put, ^segment_uri, "a"}, 1_000)
+      assert_receive({:write, ^segment_uri, "a"}, 1_000)
 
       # Assertion on end-of-stream
-      assert_receive({:put, ^playlist_uri, payload}, 1_000)
+      assert_receive({:write, ^playlist_uri, payload}, 1_000)
       playlist = %Media{}
       assert %Media{finished: true} = Playlist.unmarshal(payload, playlist)
     end

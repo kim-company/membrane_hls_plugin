@@ -2,18 +2,15 @@ defmodule Support.TestingStorage do
   defstruct [:owner]
 end
 
-defimpl HLS.Storage.Driver, for: Support.TestingStorage do
+defimpl HLS.Storage, for: Support.TestingStorage do
   @impl true
-  def ready?(_), do: true
+  def exists?(_, _), do: true
 
   @impl true
-  def get(_), do: raise("Not implemented")
+  def read(_, _, _), do: raise("Not implemented")
 
   @impl true
-  def get(_, _), do: raise("Not implemented")
-
-  @impl true
-  def put(%Support.TestingStorage{owner: pid}, uri, data, _opts) do
-    send(pid, {:put, uri, data})
+  def write(%Support.TestingStorage{owner: pid}, uri, data, _opts) do
+    send(pid, {:write, uri, data})
   end
 end

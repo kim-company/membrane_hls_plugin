@@ -9,9 +9,9 @@ defmodule Membrane.HLS.Sink do
   require Membrane.Logger
 
   def_options(
-    storage: [
+    writer: [
       spec: HLS.Storage.t(),
-      description: "HLS.Storage instance pointing to the target HLS playlist"
+      description: "HLS.Storage instance used to upload segments"
     ],
     playlist: [
       spec: HLS.Playlist.Media.t(),
@@ -35,7 +35,7 @@ defmodule Membrane.HLS.Sink do
   def handle_init(_ctx, opts) do
     {[],
      %{
-       storage: opts.storage,
+       writer: opts.writer,
        playlist: opts.playlist,
        formatter: opts.segment_formatter
      }}
@@ -45,8 +45,13 @@ defmodule Membrane.HLS.Sink do
     state =
       state
       |> Map.put(:builder, Builder.new(playlist, ".vtt"))
-      |> Map.take([:builder, :storage, :formatter])
+      |> Map.take([:builder, :writer, :formatter])
 
+    {[], state}
+  end
+
+  def handle_stream_format(_pad, format, _ctx, state = %{builder: _}) do
+    Membrane.Logger.warn("Received stream format more than once: #{inspect(format)}")
     {[], state}
   end
 
@@ -85,9 +90,7 @@ defmodule Membrane.HLS.Sink do
     |> Enum.join()
   end
 
-  defp take_and_upload_segments(
-         state = %{builder: builder, formatter: formatter, storage: storage}
-       ) do
+  defp take_and_upload_segments(state = %{builder: builder, formatter: formatter, writer: writer}) do
     {uploadables, builder} = Builder.take_uploadables(builder)
 
     uploadables
@@ -112,18 +115,18 @@ defmodule Membrane.HLS.Sink do
     |> Enum.each(fn %{uri: uri, payload: payload} ->
       Membrane.Logger.debug("Uploading payload #{byte_size(payload)} to #{inspect(uri)}")
 
-      Storage.put(storage, uri, payload)
+      Storage.write(writer, uri, payload)
     end)
 
     %{state | builder: builder}
   end
 
-  defp upload_playlist(state = %{builder: builder, storage: storage}) do
+  defp upload_playlist(state = %{builder: builder, writer: writer}) do
     # Upload the playlist
     playlist = %Media{uri: uri} = Builder.playlist(builder)
     payload = Playlist.marshal(playlist)
     Membrane.Logger.debug("Uploading playlist to #{inspect(uri)}")
-    Storage.put(storage, uri, payload)
+    Storage.write(writer, uri, payload)
     state
   end
 

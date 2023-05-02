@@ -3,21 +3,21 @@ defmodule Membrane.HLS.SourceTest do
 
   alias Membrane.HLS.Source
 
-  alias HLS.Storage
+  alias HLS.Reader
   alias HLS.Playlist.Master
 
   import Membrane.Testing.Assertions
 
   @master_playlist_path "./test/fixtures/mpeg-ts/stream.m3u8"
-  @store Storage.new(@master_playlist_path)
+  @store Reader.new(URI.new!(@master_playlist_path))
 
   defmodule Pipeline do
     use Membrane.Pipeline
 
     @impl true
-    def handle_init(_ctx, opts = %{storage: storage}) do
+    def handle_init(_ctx, opts = %{reader: reader}) do
       structure = [
-        child(:source, %Source{storage: storage})
+        child(:source, %Source{reader: reader})
       ]
 
       {[{:spec, structure}, {:playback, :playing}], opts}
@@ -50,7 +50,7 @@ defmodule Membrane.HLS.SourceTest do
       options = [
         module: Pipeline,
         custom_args: %{
-          storage: @store,
+          reader: @store,
           stream_selector: fn _ -> false end
         }
       ]
@@ -66,7 +66,7 @@ defmodule Membrane.HLS.SourceTest do
       options = [
         module: Pipeline,
         custom_args: %{
-          storage: @store,
+          reader: @store,
           stream_selector: fn stream -> stream.uri.path == stream_name <> ".m3u8" end
         },
         test_process: self()
