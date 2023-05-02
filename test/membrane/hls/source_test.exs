@@ -2,22 +2,20 @@ defmodule Membrane.HLS.SourceTest do
   use ExUnit.Case
 
   alias Membrane.HLS.Source
-
-  alias HLS.Reader
   alias HLS.Playlist.Master
+  alias HLS.FS.OS
 
   import Membrane.Testing.Assertions
 
-  @master_playlist_path "./test/fixtures/mpeg-ts/stream.m3u8"
-  @store Reader.new(URI.new!(@master_playlist_path))
+  @master_playlist_uri URI.new!("./test/fixtures/mpeg-ts/stream.m3u8")
 
   defmodule Pipeline do
     use Membrane.Pipeline
 
     @impl true
-    def handle_init(_ctx, opts = %{reader: reader}) do
+    def handle_init(_ctx, opts = %{reader: reader, master_playlist_uri: uri}) do
       structure = [
-        child(:source, %Source{reader: reader})
+        child(:source, %Source{reader: reader, master_playlist_uri: uri})
       ]
 
       {[{:spec, structure}, {:playback, :playing}], opts}
@@ -50,7 +48,8 @@ defmodule Membrane.HLS.SourceTest do
       options = [
         module: Pipeline,
         custom_args: %{
-          reader: @store,
+          reader: OS.new(),
+          master_playlist_uri: @master_playlist_uri,
           stream_selector: fn _ -> false end
         }
       ]
@@ -63,11 +62,18 @@ defmodule Membrane.HLS.SourceTest do
     test "provides all segments of selected rendition" do
       stream_name = "stream_416x234"
 
+      target_stream_uri =
+        HLS.Playlist.Master.build_media_uri(
+          @master_playlist_uri,
+          URI.new!(stream_name <> ".m3u8")
+        )
+
       options = [
         module: Pipeline,
         custom_args: %{
-          reader: @store,
-          stream_selector: fn stream -> stream.uri.path == stream_name <> ".m3u8" end
+          reader: OS.new(),
+          master_playlist_uri: @master_playlist_uri,
+          stream_selector: fn stream -> stream.uri == target_stream_uri end
         },
         test_process: self()
       ]
@@ -78,7 +84,8 @@ defmodule Membrane.HLS.SourceTest do
       assert_sink_stream_format(pipeline, :sink, %Membrane.HLS.Format.MPEG{})
 
       # Asserting that each chunks in the selected playlist is seen by the sink
-      base_dir = Path.join([Path.dirname(@master_playlist_path), stream_name, "00000"])
+      %URI{path: master_playlist_path} = @master_playlist_uri
+      base_dir = Path.join([Path.dirname(master_playlist_path), stream_name, "00000"])
 
       base_dir
       |> File.ls!()

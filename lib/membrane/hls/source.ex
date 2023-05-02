@@ -1,8 +1,10 @@
 defmodule Membrane.HLS.Source do
   use Membrane.Source
 
-  alias HLS.Reader
+  alias HLS.FS.Reader
   alias HLS.Playlist.Media.Tracker
+  alias HLS.Playlist
+  alias HLS.Playlist.Master
   alias Membrane.Buffer
   alias Membrane.HLS.Format
   alias Membrane.HLS.TaskSupervisor
@@ -18,14 +20,24 @@ defmodule Membrane.HLS.Source do
 
   def_options(
     reader: [
-      spec: HLS.Reader.t(),
-      description: "HLS.Reader instance pointing to the target HLS playlist"
+      spec: HLS.FS.Reader.t(),
+      description: "HLS.Reader implementation used to obtain playlist's contents"
+    ],
+    master_playlist_uri: [
+      spec: URI.t(),
+      description: "URI of the master playlist"
     ]
   )
 
   @impl true
   def handle_init(_ctx, options) do
-    {[], %{reader: options.reader, pad_to_tracker: %{}, ref_to_pad: %{}}}
+    {[],
+     %{
+       reader: options.reader,
+       master_playlist_uri: options.master_playlist_uri,
+       pad_to_tracker: %{},
+       ref_to_pad: %{}
+     }}
   end
 
   @impl true
@@ -75,9 +87,14 @@ defmodule Membrane.HLS.Source do
   end
 
   @impl true
-  def handle_info(:check_master_playlist, _ctx, state = %{reader: store}) do
-    case Reader.read_master_playlist(store) do
-      {:ok, playlist} ->
+  def handle_info(
+        :check_master_playlist,
+        _ctx,
+        state = %{reader: reader, master_playlist_uri: uri}
+      ) do
+    case Reader.read(reader, uri) do
+      {:ok, data} ->
+        playlist = Playlist.unmarshal(data, %Master{uri: uri})
         {[{:notify_parent, {:hls_master_playlist, playlist}}], state}
 
       {:error, reason} ->
@@ -192,7 +209,7 @@ defmodule Membrane.HLS.Source do
 
         task =
           Task.Supervisor.async_nolink(TaskSupervisor, fn ->
-            HLS.Reader.read_segment(reader, segment.uri)
+            Reader.read(reader, segment.uri)
           end)
 
         %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}

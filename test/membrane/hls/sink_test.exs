@@ -3,14 +3,13 @@ defmodule Membrane.HLS.SinkTest do
 
   alias HLS.Playlist.Media
   alias Membrane.Buffer
-  alias HLS.Playlist
+  import Membrane.Testing.Assertions
 
   defmodule Pipeline do
     use Membrane.Pipeline
 
     @impl true
     def handle_init(_ctx, %{
-          writer: writer,
           playlist: playlist,
           output: output
         }) do
@@ -20,7 +19,6 @@ defmodule Membrane.HLS.SinkTest do
           stream_format: %Membrane.HLS.Format.WebVTT{language: "en-US"}
         })
         |> child(:sink, %Membrane.HLS.Sink{
-          writer: writer,
           playlist: playlist
         })
       ]
@@ -50,13 +48,11 @@ defmodule Membrane.HLS.SinkTest do
 
   describe "hls sink" do
     test "works with one segment" do
-      writer = %Support.TestingStorage{owner: self()}
       playlist_uri = URI.new!("s3://bucket/media.m3u8")
 
       options = [
         module: Pipeline,
         custom_args: %{
-          writer: writer,
           playlist: %Media{
             target_segment_duration: 1,
             uri: playlist_uri
@@ -73,16 +69,37 @@ defmodule Membrane.HLS.SinkTest do
         test_process: self()
       ]
 
-      _pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
 
-      assert_receive({:write, ^playlist_uri, _data}, 1_000)
+      assert_pipeline_notified(
+        pipeline,
+        :sink,
+        {:write, %{type: :playlist, uri: ^playlist_uri}},
+        1_000
+      )
+
       segment_uri = URI.new!("s3://bucket/media/00000.vtt")
-      assert_receive({:write, ^segment_uri, "a"}, 1_000)
+
+      assert_pipeline_notified(
+        pipeline,
+        :sink,
+        {:write,
+         %{
+           uri: ^segment_uri,
+           buffers: [%Membrane.Buffer{payload: "a"}],
+           type: :segment,
+           format: %Membrane.HLS.Format.WebVTT{}
+         }},
+        1_000
+      )
 
       # Assertion on end-of-stream
-      assert_receive({:write, ^playlist_uri, payload}, 1_000)
-      playlist = %Media{}
-      assert %Media{finished: true} = Playlist.unmarshal(payload, playlist)
+      assert_pipeline_notified(
+        pipeline,
+        :sink,
+        {:write, %{type: :playlist, uri: ^playlist_uri, playlist: %Media{finished: true}}},
+        1_000
+      )
     end
   end
 end
