@@ -5,8 +5,6 @@ defmodule Membrane.HLS.Sink do
   alias HLS.Playlist.Media
   alias HLS.Playlist.Media.Builder
 
-  require Membrane.Logger
-
   def_options(
     playlist: [
       spec: HLS.Playlist.Media.t(),
@@ -39,12 +37,8 @@ defmodule Membrane.HLS.Sink do
     {[], state}
   end
 
-  def handle_stream_format(pad, format, _ctx, state = %{builder: _}) do
-    Membrane.Logger.warn(
-      "Received stream format from pad #{inspect(pad)} more than once: #{inspect(format)}"
-    )
-
-    {[], state}
+  def handle_stream_format(pad, format, _ctx, %{builder: _}) do
+    raise("Received stream format from pad #{inspect(pad)} more than once: #{inspect(format)}")
   end
 
   def handle_end_of_stream(
