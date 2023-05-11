@@ -29,10 +29,7 @@ defmodule Membrane.HLS.SinkTest do
     test "handles one segment" do
       playlist_uri = URI.new!("s3://bucket/media.m3u8")
 
-      playlist = %Media{
-        target_segment_duration: 1,
-        uri: playlist_uri
-      }
+      playlist = Media.new(playlist_uri, 1)
 
       output =
         {[
