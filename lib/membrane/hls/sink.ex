@@ -70,7 +70,7 @@ defmodule Membrane.HLS.Sink do
 
     segment_notifications =
       uploadables
-      |> Enum.map(fn %{uri: uri, payload: payloads} ->
+      |> Enum.map(fn %{uri: uri, buffers: payloads, from: segment_from, to: segment_to} ->
         payload =
           payloads
           |> Enum.map(fn %{from: from, to: to, payload: payload} ->
@@ -85,7 +85,13 @@ defmodule Membrane.HLS.Sink do
             }
           end)
 
-        %{uri: uri, type: :segment, format: format, buffers: payload}
+        %{
+          uri: uri,
+          type: :segment,
+          format: format,
+          buffers: payload,
+          segment: %{from: segment_from, to: segment_to}
+        }
       end)
       |> Enum.map(fn payload -> {:notify_parent, {:write, payload}} end)
 

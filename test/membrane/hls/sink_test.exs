@@ -6,43 +6,23 @@ defmodule Membrane.HLS.SinkTest do
   alias Membrane.Buffer
   import Membrane.Testing.Assertions
 
-  def buffer_generator(buffers, size) do
-    {buffers, rest} = Enum.split(buffers, size)
-
-    if Enum.empty?(buffers) do
-      {[end_of_stream: :output], rest}
-    else
-      buffer_actions = [buffer: {:output, buffers}]
-
-      actions =
-        if Enum.empty?(rest) do
-          buffer_actions ++ [end_of_stream: :output]
-        else
-          buffer_actions
-        end
-
-      {actions, rest}
-    end
-  end
-
   describe "hls sink" do
     test "handles one segment" do
       playlist_uri = URI.new!("s3://bucket/media.m3u8")
 
       playlist = Media.new(playlist_uri, 1)
 
-      output =
-        {[
-           %Buffer{
-             payload: "a",
-             pts: 0,
-             metadata: %{duration: Membrane.Time.milliseconds(1_500)}
-           }
-         ], &__MODULE__.buffer_generator/2}
+      buffers = [
+        %Buffer{
+          payload: "a",
+          pts: 0,
+          metadata: %{duration: Membrane.Time.milliseconds(1_500)}
+        }
+      ]
 
       links = [
         child(:source, %Membrane.Testing.Source{
-          output: output,
+          output: Membrane.Testing.Source.output_from_buffers(buffers),
           stream_format: %Membrane.HLS.Format.WebVTT{language: "en-US"}
         })
         |> child(:sink, %Membrane.HLS.Sink{
@@ -62,7 +42,8 @@ defmodule Membrane.HLS.SinkTest do
            uri: ^segment_uri,
            buffers: [%Membrane.Buffer{payload: "a"}],
            type: :segment,
-           format: %Membrane.HLS.Format.WebVTT{}
+           format: %Membrane.HLS.Format.WebVTT{},
+           segment: %{from: 0, to: 1}
          }},
         1_000
       )
