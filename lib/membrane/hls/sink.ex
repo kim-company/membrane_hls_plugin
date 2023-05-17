@@ -2,13 +2,25 @@ defmodule Membrane.HLS.Sink do
   use Membrane.Sink
   alias Membrane.Buffer
   alias Membrane.HLS.Format
-  alias HLS.Playlist.Media
+  alias Membrane.HLS.SegmentFormatter
+  alias HLS.Playlist
   alias HLS.Playlist.Media.Builder
+  alias HLS.Segment
+
+  require Membrane.Logger
 
   def_options(
     playlist: [
       spec: HLS.Playlist.Media.t(),
       description: "Media playlist tracking the segments"
+    ],
+    writer: [
+      spec: HLS.FS.Writer.t(),
+      description: "Writer implementation that takes care of storing segments and playlist"
+    ],
+    formatter: [
+      spec: SegmentFormatter.t(),
+      description: "SegmentFormatter implementation that formats buffers into segments"
     ]
   )
 
@@ -21,24 +33,18 @@ defmodule Membrane.HLS.Sink do
 
   @impl true
   def handle_init(_ctx, opts) do
+    extension = SegmentFormatter.segment_extension(opts.formatter)
+
+    builder =
+      Builder.new(opts.playlist, segment_extension: extension, replace_empty_segments_uri: true)
+
     {[],
      %{
-       playlist: opts.playlist
+       playlist: opts.playlist,
+       writer: opts.writer,
+       formatter: opts.formatter,
+       builder: builder
      }}
-  end
-
-  def handle_stream_format(_pad, format = %Format.WebVTT{}, _ctx, state = %{playlist: playlist}) do
-    state =
-      state
-      |> Map.put(:builder, Builder.new(playlist, ".vtt"))
-      |> Map.put(:format, format)
-      |> Map.take([:builder, :format])
-
-    {[], state}
-  end
-
-  def handle_stream_format(pad, format, _ctx, %{builder: _}) do
-    raise("Received stream format from pad #{inspect(pad)} more than once: #{inspect(format)}")
   end
 
   def handle_end_of_stream(
@@ -46,33 +52,74 @@ defmodule Membrane.HLS.Sink do
         _ctx,
         state
       ) do
-    state
-    |> update_in([:builder], &Builder.flush(&1))
-    |> build_parent_notifications(true)
+    write_segments_and_playlist(state, true)
   end
 
   def handle_write(
         _pad,
-        %Buffer{pts: pts, payload: payload, metadata: %{duration: duration}},
+        buffer,
         _ctx,
         state
       ) do
-    from = convert_time_to_seconds(pts)
-    timed_payload = %{from: from, to: from + convert_time_to_seconds(duration), payload: payload}
+    timed_payload = buffer_to_timed_payload(buffer)
 
     state
     |> update_in([:builder], &Builder.fit(&1, timed_payload))
-    |> build_parent_notifications()
+    |> write_segments_and_playlist()
   end
 
-  defp build_parent_notifications(state = %{builder: builder, format: format}, force \\ false) do
-    {uploadables, builder} = Builder.take_uploadables(builder)
+  defp write(writer, uri, payload, pts) do
+    start_at = DateTime.utc_now()
 
-    segment_notifications =
-      uploadables
-      |> Enum.map(fn %{uri: uri, buffers: payloads, from: segment_from, to: segment_to} ->
-        payload =
-          payloads
+    response = HLS.FS.Writer.write(writer, uri, payload)
+    latency = DateTime.diff(DateTime.utc_now(), start_at, :nanosecond)
+
+    case response do
+      :ok ->
+        Membrane.Logger.info(
+          "wrote uri #{inspect(URI.to_string(uri))}",
+          %{
+            type: :latency,
+            origin: "hls.sink",
+            latency: latency,
+            input: %{
+              pts: pts,
+              byte_size: byte_size(payload)
+            }
+          }
+        )
+
+        true
+
+      {:error, reason} ->
+        Membrane.Logger.error(
+          "write failed for uri #{inspect(URI.to_string(uri))} with reason: #{inspect(reason)}",
+          %{
+            type: :latency,
+            origin: "hls.sink",
+            latency: latency,
+            input: %{
+              pts: pts,
+              byte_size: byte_size(payload)
+            }
+          }
+        )
+
+        false
+    end
+  end
+
+  defp write_segments_and_playlist(
+         state = %{builder: builder, writer: writer, formatter: formatter},
+         force \\ false
+       ) do
+    {uploadables, builder} = Builder.pop(builder, force: force)
+    playlist_uri = Builder.playlist(builder).uri
+
+    builder =
+      Enum.reduce(uploadables, builder, fn uploadable, builder ->
+        buffers =
+          uploadable.payloads
           |> Enum.map(fn %{from: from, to: to, payload: payload} ->
             pts = convert_seconds_to_time(from)
 
@@ -85,26 +132,33 @@ defmodule Membrane.HLS.Sink do
             }
           end)
 
-        %{
-          uri: uri,
-          type: :segment,
-          format: format,
-          buffers: payload,
-          segment: %{from: segment_from, to: segment_to}
-        }
+        payload = SegmentFormatter.format_segment(formatter, buffers)
+
+        if write(
+             writer,
+             Playlist.Media.build_segment_uri(playlist_uri, uploadable.segment.uri),
+             payload,
+             convert_seconds_to_time(uploadable.from)
+           ) do
+          Builder.ack(builder, uploadable.ref)
+        else
+          Builder.nack(builder, uploadable.ref)
+        end
       end)
-      |> Enum.map(fn payload -> {:notify_parent, {:write, payload}} end)
 
-    playlist_notifications =
-      if Enum.empty?(segment_notifications) and not force do
-        []
-      else
-        playlist = %Media{uri: uri} = Builder.playlist(builder)
-        [{:notify_parent, {:write, %{uri: uri, type: :playlist, playlist: playlist}}}]
-      end
+    if not Enum.empty?(uploadables) do
+      playlist = Builder.playlist(builder)
+      payload = Playlist.marshal(playlist)
 
-    notifications = segment_notifications ++ playlist_notifications
-    {notifications, %{state | builder: builder}}
+      duration =
+        playlist.segments
+        |> Enum.map(fn %Segment{duration: duration} -> duration end)
+        |> Enum.sum()
+
+      write(writer, playlist.uri, payload, convert_seconds_to_time(duration))
+    end
+
+    {[], %{state | builder: builder}}
   end
 
   defp convert_time_to_seconds(time) do
@@ -117,5 +171,14 @@ defmodule Membrane.HLS.Sink do
     (seconds * 1_000_000_000)
     |> trunc()
     |> Membrane.Time.nanoseconds()
+  end
+
+  defp buffer_to_timed_payload(%Buffer{
+         pts: pts,
+         payload: payload,
+         metadata: %{duration: duration}
+       }) do
+    from = convert_time_to_seconds(pts)
+    %{from: from, to: from + convert_time_to_seconds(duration), payload: payload}
   end
 end
