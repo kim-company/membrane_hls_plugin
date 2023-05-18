@@ -7,8 +7,12 @@ defmodule Support.Writer do
     %__MODULE__{agent: pid}
   end
 
-  def history(%__MODULE__{agent: pid}) do
-    Agent.get(pid, fn %{acc: acc} -> Enum.reverse(acc) end)
+  def history(%__MODULE__{agent: pid}, take) do
+    Agent.get(pid, fn %{acc: acc} ->
+      acc
+      |> Enum.reverse()
+      |> Enum.take(take)
+    end)
   end
 end
 

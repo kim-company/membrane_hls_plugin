@@ -51,10 +51,13 @@ defmodule Membrane.HLS.SinkTest do
                {URI.new!("s3://bucket/media/00000.txt"), "a"},
                {URI.new!("s3://bucket/media.m3u8"),
                 "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/00000.txt\n"}
-             ] == Support.Writer.history(writer)
+             ] == Support.Writer.history(writer, 2)
     end
 
-    test "writes pending segments at EOS", %{playlist: playlist, writer: writer} do
+    test "writes pending segments at EOS, the plalist is finished", %{
+      playlist: playlist,
+      writer: writer
+    } do
       buffers = [
         %Buffer{
           payload: "a",
@@ -72,8 +75,8 @@ defmodule Membrane.HLS.SinkTest do
       assert [
                {URI.new!("s3://bucket/media/00000.txt"), "a"},
                {URI.new!("s3://bucket/media.m3u8"),
-                "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/00000.txt\n"}
-             ] == Support.Writer.history(writer)
+                "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/00000.txt\n#EXT-X-ENDLIST\n"}
+             ] == Support.Writer.history(writer, 2)
     end
 
     test "in case of failure an empty segment replaces the failing upload", %{playlist: playlist} do
@@ -97,7 +100,7 @@ defmodule Membrane.HLS.SinkTest do
                {URI.new!("s3://bucket/media/00000.txt"), "a"},
                {URI.new!("s3://bucket/media.m3u8"),
                 "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/empty.txt\n"}
-             ] == Support.Writer.history(writer)
+             ] == Support.Writer.history(writer, 2)
     end
 
     test "empty buffers are replaced with the empty segment", %{
@@ -122,7 +125,7 @@ defmodule Membrane.HLS.SinkTest do
                {URI.new!("s3://bucket/media/empty.txt"), ""},
                {URI.new!("s3://bucket/media.m3u8"),
                 "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/empty.txt\n"}
-             ] == Support.Writer.history(writer)
+             ] == Support.Writer.history(writer, 2)
     end
   end
 end

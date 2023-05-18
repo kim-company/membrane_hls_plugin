@@ -146,8 +146,8 @@ defmodule Membrane.HLS.Sink do
         end
       end)
 
-    if not Enum.empty?(uploadables) do
-      playlist = Builder.playlist(builder)
+    if not Enum.empty?(uploadables) or force do
+      playlist = %Playlist.Media{Builder.playlist(builder) | finished: force}
       payload = Playlist.marshal(playlist)
 
       duration =
