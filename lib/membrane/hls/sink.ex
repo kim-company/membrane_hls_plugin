@@ -146,19 +146,27 @@ defmodule Membrane.HLS.Sink do
         end
       end)
 
-    if not Enum.empty?(uploadables) or force do
-      playlist = %Playlist.Media{Builder.playlist(builder) | finished: force}
-      payload = Playlist.marshal(playlist)
+    actions =
+      if not Enum.empty?(uploadables) or force do
+        playlist = %Playlist.Media{Builder.playlist(builder) | finished: force}
+        payload = Playlist.marshal(playlist)
 
-      duration =
-        playlist.segments
-        |> Enum.map(fn %Segment{duration: duration} -> duration end)
-        |> Enum.sum()
+        duration =
+          playlist.segments
+          |> Enum.map(fn %Segment{duration: duration} -> duration end)
+          |> Enum.sum()
+          |> convert_seconds_to_time()
 
-      write(writer, playlist.uri, payload, convert_seconds_to_time(duration))
-    end
+        if write(writer, playlist.uri, payload, duration) do
+          [notify_parent: {:wrote_playlist, duration}]
+        else
+          []
+        end
+      else
+        []
+      end
 
-    {[], %{state | builder: builder}}
+    {actions, %{state | builder: builder}}
   end
 
   defp convert_time_to_seconds(time) do
