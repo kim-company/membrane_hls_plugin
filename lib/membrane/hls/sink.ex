@@ -92,7 +92,7 @@ defmodule Membrane.HLS.Sink do
         true
 
       {:error, reason} ->
-        Membrane.Logger.error(
+        Membrane.Logger.warn(
           "write failed for uri #{inspect(URI.to_string(uri))} with reason: #{inspect(reason)}",
           %{
             type: :latency,
