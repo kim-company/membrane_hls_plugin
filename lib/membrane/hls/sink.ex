@@ -158,7 +158,7 @@ defmodule Membrane.HLS.Sink do
           |> convert_seconds_to_time()
 
         if write(writer, playlist.uri, payload, duration) do
-          [notify_parent: {:wrote_playlist, duration}]
+          [notify_parent: {:wrote_playlist, playlist.uri, duration}]
         else
           []
         end
