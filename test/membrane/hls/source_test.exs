@@ -81,7 +81,10 @@ defmodule Membrane.HLS.SourceTest do
       pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
 
       assert_start_of_stream(pipeline, :sink)
-      assert_sink_stream_format(pipeline, :sink, %Membrane.HLS.Format.MPEG{})
+
+      assert_sink_stream_format(pipeline, :sink, %Membrane.RemoteStream{
+        content_format: %Membrane.HLS.Format.MPEG{}
+      })
 
       # Asserting that each chunks in the selected playlist is seen by the sink
       %URI{path: master_playlist_path} = @master_playlist_uri

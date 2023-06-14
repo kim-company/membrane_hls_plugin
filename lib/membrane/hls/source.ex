@@ -15,7 +15,9 @@ defmodule Membrane.HLS.Source do
   def_output_pad(:output,
     mode: :pull,
     availability: :on_request,
-    accepted_format: any_of(Format.PackedAudio, Format.WebVTT, Format.MPEG)
+    accepted_format:
+      %Membrane.RemoteStream{content_format: %format{}}
+      when format in [Format.PackedAudio, Format.WebVTT, Format.MPEG]
   )
 
   def_options(
@@ -58,7 +60,10 @@ defmodule Membrane.HLS.Source do
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
     state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
 
-    {[{:stream_format, {pad, build_stream_format(rendition)}}], state}
+    {[
+       {:stream_format,
+        {pad, %Membrane.RemoteStream{content_format: build_stream_format(rendition)}}}
+     ], state}
   end
 
   @impl true
@@ -98,9 +103,9 @@ defmodule Membrane.HLS.Source do
         {[{:notify_parent, {:hls_master_playlist, playlist}}], state}
 
       {:error, reason} ->
-        Membrane.Logger.debug("Master playlist check failed: #{inspect(reason)}")
+        Membrane.Logger.warn("Master playlist check failed: #{inspect(reason)}")
 
-        Membrane.Logger.debug(
+        Membrane.Logger.warn(
           "Master playlist check attempt scheduled in #{@master_check_retry_interval_ms}ms"
         )
 
