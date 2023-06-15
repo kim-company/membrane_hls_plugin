@@ -195,7 +195,7 @@ defmodule Membrane.HLS.Source do
       unless closed, do: Tracker.stop(pid)
     end)
 
-    {[], %{state | pad_to_tracker: %{}, ref_to_pad: %{}}}
+    {[terminate: :normal], %{state | pad_to_tracker: %{}, ref_to_pad: %{}}}
   end
 
   defp tracker_by_task_ref!(pad_to_tracker, task_ref) do
