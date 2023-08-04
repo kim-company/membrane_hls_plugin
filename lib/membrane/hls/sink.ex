@@ -1,6 +1,6 @@
 defmodule Membrane.HLS.Sink do
   use Membrane.Sink
-  alias Membrane.Buffer
+
   alias Membrane.HLS.SegmentContentBuilder, as: SCB
   alias HLS.{Playlist, Segment}
   alias HLS.Playlist.Media.Builder
@@ -19,9 +19,10 @@ defmodule Membrane.HLS.Sink do
     safety_delay: [
       spec: Membrane.Time.t(),
       description:
-        "Safety buffer of time which increases the delay of the sink but ensures that once it starts are included in the segments"
+        "Safety buffer of time which increases the delay of the sink but ensures that once it starts are included in the segments",
+      default: Membrane.Time.milliseconds(100)
     ],
-    content_builder: [
+    segment_content_builder: [
       spec: SegmentContentBuilder.t(),
       description:
         "SegmentContentBuilder implementation that takes care of putting buffers in the right segments."
@@ -37,17 +38,20 @@ defmodule Membrane.HLS.Sink do
 
   @impl true
   def handle_init(_ctx, opts) do
-    extension = SCB.segment_extension(opts.content_builder)
-
     builder =
-      Builder.new(opts.playlist, segment_extension: extension, replace_empty_segments_uri: true)
+      Builder.new(opts.playlist,
+        segment_extension: SCB.segment_extension(opts.segment_content_builder),
+        replace_empty_segments_uri: true
+      )
 
     {[],
      %{
        playlist: opts.playlist,
        writer: opts.writer,
-       content_builder: opts.content_builder,
-       builder: builder
+       content_builder: opts.segment_content_builder,
+       builder: builder,
+       safety_delay: opts.safety_delay,
+       timer: nil
      }}
   end
 
@@ -58,247 +62,161 @@ defmodule Membrane.HLS.Sink do
   end
 
   @impl true
-  def handle_end_of_stream(_pad, _ctx, state) do
-    # TODO: flush everythin and write the playlist.
-    # write_segments_and_playlist(state, true)
-    {[], state}
-  end
-
-  defp write_segments_and_playlist(
-         state = %{builder: builder, writer: writer, formatter: formatter},
-         force \\ false
-       ) do
-    {uploadables, builder} = Builder.pop(builder, force: force)
-    playlist_uri = Builder.playlist(builder).uri
-
-    builder =
-      Enum.reduce(uploadables, builder, fn uploadable, builder ->
-        buffers =
-          uploadable.payloads
-          |> Enum.map(fn %{from: from, to: to, payload: payload} ->
-            pts = convert_seconds_to_time(from)
-
-            %Buffer{
-              pts: pts,
-              payload: payload,
-              metadata: %{
-                duration: convert_seconds_to_time(to) - pts
-              }
-            }
-          end)
-
-        payload = SegmentFormatter.format_segment(formatter, buffers)
-
-        if write(
-             writer,
-             Playlist.Media.build_segment_uri(playlist_uri, uploadable.segment.uri),
-             payload,
-             convert_seconds_to_time(uploadable.from)
-           ) do
-          Builder.ack(builder, uploadable.ref)
-        else
-          Builder.nack(builder, uploadable.ref)
-        end
-      end)
-
-    actions =
-      if not Enum.empty?(uploadables) or force do
-        playlist = %Playlist.Media{Builder.playlist(builder) | finished: force}
-        payload = Playlist.marshal(playlist)
-
-        duration =
-          playlist.segments
-          |> Enum.map(fn %Segment{duration: duration} -> duration end)
-          |> Enum.sum()
-          |> convert_seconds_to_time()
-
-        if write(writer, playlist.uri, payload, duration) do
-          [notify_parent: {:wrote_playlist, playlist.uri, duration}]
-        else
-          []
-        end
-      else
-        []
-      end
-
-    {actions, %{state | builder: builder}}
+  def handle_info(:sync, _ctx, state) do
+    state = reload_sync_timer(state)
+    {segment_actions, state} = write_next_segment(state)
+    {playlist_actions, state} = write_playlist(state)
+    {segment_actions ++ playlist_actions, state}
   end
 
   @impl true
-  def handle_info(:sync, _ctx, state) do
-    {segment, builder} = Builder.next_segment(state.builder)
+  def handle_parent_notification({:start, playback}, _ctx, state) do
+    {segments, builder} = Builder.sync(state.builder, Membrane.Time.round_to_seconds(playback))
+    state = %{state | builder: builder}
 
-    {late_buffers, content_builder} =
-      SCB.drop_buffers_before_segment(state.content_builder, segment)
+    {segment_actions, state} =
+      Enum.reduce(segments, {[], state}, fn segment, {actions, state} ->
+        {new_actions, state} = write_and_ack([], segment, state)
+        {actions ++ new_actions, state}
+      end)
 
-    {buffers, content_builder, _} = SCB.fit_in_segment(content_builder, segment)
+    interval = state.safety_delay + Builder.playlist(state.builder).target_segment_duration
+    timer = Process.send_after(self(), :sync, Membrane.Time.round_to_milliseconds(interval))
+    state = %{state | timer: timer}
 
-    # We could also send a notification to the pipeline and handle
-    # this case there. We might consider restarting it.
-    unless Enum.empty?(late_buffers) do
-      Membrane.Logger.warn(
-        "SegmentContentBuilder received buffers that came too late: #{inspect(late_buffers)}"
-      )
+    {playlist_actions, state} =
+      unless Enum.empty?(segment_actions) do
+        write_playlist(state)
+      else
+        {[], state}
+      end
+
+    {segment_actions ++ playlist_actions, state}
+  end
+
+  @impl true
+  def handle_end_of_stream(_pad, _ctx, state) do
+    if state.timer != nil, do: Process.cancel_timer(state.timer)
+
+    flush_and_write_playlist(state, [])
+  end
+
+  defp flush_and_write_playlist(state, acc) do
+    {segment_actions, state} = write_next_segment(state)
+
+    if SCB.is_empty?(state.content_builder) do
+      {playlist_actions, state} = write_playlist(state)
+      {acc ++ segment_actions ++ playlist_actions, state}
+    else
+      flush_and_write_playlist(state, acc ++ segment_actions)
     end
-
-    write_and_ack(buffers, segment, %{
-      state
-      | content_builder: content_builder,
-        builder: builder
-    })
-    |> write_playlist_with_actions()
   end
 
   defp write_next_segment(state) do
     {segment, builder} = Builder.next_segment(state.builder)
 
-    {late_buffers, content_builder} =
-      SCB.drop_buffers_before_segment(state.content_builder, segment)
+    {content_builder, late_buffers} = SCB.drop_late_buffers(state.content_builder, segment)
+    {content_builder, buffers} = SCB.drop_buffers_in_segment(content_builder, segment)
+    state = %{state | content_builder: content_builder, builder: builder}
 
-    {buffers, content_builder, _} = SCB.fit_in_segment(content_builder, segment)
+    segment =
+      if Enum.empty?(buffers) do
+        %Segment{segment | uri: Builder.empty_segment_uri(builder)}
+      else
+        segment
+      end
 
-    # We could also send a notification to the pipeline and handle
-    # this case there. We might consider restarting it.
-    unless Enum.empty?(late_buffers) do
-      Membrane.Logger.warn(
-        "SegmentContentBuilder received buffers that came too late: #{inspect(late_buffers)}"
-      )
-    end
-
-    write_and_ack(buffers, segment, %{
-      state
-      | content_builder: content_builder,
-        builder: builder
-    })
-    |> write_playlist_with_actions()
-  end
-
-  @impl true
-  def handle_parent_notification({:start, playback}, _ctx, state) do
-    t = Membrane.Time.monotonic_time() + state.safety_delay
-    {segments, builder} = Builder.sync(state.builder, Membrane.Time.round_to_seconds(playback))
-    state = %{state | builder: builder, absolute_time: t, playback: t}
-
-    state =
-      segments
-      |> Enum.reduce(state, &write_and_ack([], &1, &2))
-      |> reload_sync_timer()
-
-    write_playlist_with_actions(state)
-  end
-
-  defp reload_sync_timer(state) do
-    send_at = state.playback + Builder.playlist(state.builder).target_segment_duration
-
-    timer =
-      Process.send_after(
-        self(),
-        :sync,
-        :erlang.convert_time_unit(send_at, :nanosecond, :millisecond),
-        abs: true
-      )
-
-    %{state | timer: timer, playback: send_at}
-  end
-
-  defp write_playlist_with_actions(state, finished? \\ false) do
-    playlist = %Playlist.Media{Builder.playlist(state.builder) | finished: finished?}
-    payload = Playlist.marshal(playlist)
-
-    duration =
-      playlist.segments
-      |> Enum.map(fn %Segment{duration: duration} -> duration end)
-      |> Enum.sum()
-      |> convert_seconds_to_time()
+    {segment_actions, state} = write_and_ack(buffers, segment, state)
 
     actions =
-      if write(state.writer, playlist.uri, payload, duration) do
-        [notify_parent: {:wrote_playlist, playlist.uri, duration}]
-      else
-        []
-      end
+      List.flatten([
+        segment_actions,
+        unless(Enum.empty?(late_buffers),
+          do: [
+            notify_parent: {:segment, :write, {:error, :late_buffers}, %{buffers: late_buffers}}
+          ],
+          else: []
+        )
+      ])
 
     {actions, state}
   end
 
-  defp write_and_ack(buffers, segment, state) do
-    playlist_uri = Builder.playlist(state.builder).uri
-    payload = SCB.format_segment(state.content_builder, buffers)
+  defp reload_sync_timer(state) do
+    interval = Builder.playlist(state.builder).target_segment_duration
+    timer = Process.send_after(self(), :sync, Membrane.Time.round_to_milliseconds(interval))
 
-    builder =
-      if write(
-           state.writer,
-           Playlist.Media.build_segment_uri(playlist_uri, segment.uri),
-           payload,
-           convert_seconds_to_time(segment.from)
-         ) do
-        Builder.ack(state.builder, segment.ref)
+    %{state | timer: timer}
+  end
+
+  defp write_playlist(state, finished? \\ false) do
+    playlist = %Playlist.Media{Builder.playlist(state.builder) | finished: finished?}
+    payload = Playlist.marshal(playlist)
+
+    last_segment = List.last(playlist.segments)
+
+    playback =
+      if is_nil(last_segment) do
+        0
       else
-        Builder.nack(state.builder, segment.ref)
+        convert_seconds_to_time(last_segment.from + last_segment.duration)
       end
 
-    %{state | builder: builder}
-  end
-
-  defp write(writer, uri, payload, pts) do
     start_at = DateTime.utc_now()
-
-    response = HLS.FS.Writer.write(writer, uri, payload)
+    response = HLS.FS.Writer.write(state.writer, playlist.uri, payload)
     latency = DateTime.diff(DateTime.utc_now(), start_at, :nanosecond)
 
-    case response do
-      :ok ->
-        Membrane.Logger.info(
-          "wrote uri #{inspect(URI.to_string(uri))}",
-          %{
-            type: :latency,
-            origin: "hls.sink",
-            latency: latency,
-            input: %{
-              pts: pts,
-              byte_size: byte_size(payload)
-            }
-          }
-        )
+    metadata = %{
+      pts: playback,
+      byte_size: byte_size(payload),
+      latency: latency,
+      uri: playlist.uri
+    }
 
-        true
+    notifications =
+      case response do
+        :ok ->
+          [notify_parent: {:playlist, :write, :ok, metadata}]
 
-      {:error, reason} ->
-        Membrane.Logger.warn(
-          "write failed for uri #{inspect(URI.to_string(uri))} with reason: #{inspect(reason)}",
-          %{
-            type: :latency,
-            origin: "hls.sink",
-            latency: latency,
-            input: %{
-              pts: pts,
-              byte_size: byte_size(payload)
-            }
-          }
-        )
+        {:error, reason} ->
+          [notify_parent: {:playlist, :write, {:error, reason}, metadata}]
+      end
 
-        false
-    end
+    {notifications, state}
   end
 
-  defp convert_time_to_seconds(time) do
-    time
-    |> Membrane.Time.as_seconds()
-    |> Ratio.to_float()
+  defp write_and_ack(buffers, segment, state) do
+    start_at = DateTime.utc_now()
+    playlist_uri = Builder.playlist(state.builder).uri
+    uri = Playlist.Media.build_segment_uri(playlist_uri, segment.uri)
+    payload = SCB.format_segment(state.content_builder, buffers)
+    response = HLS.FS.Writer.write(state.writer, uri, payload)
+    latency = DateTime.diff(DateTime.utc_now(), start_at, :nanosecond)
+
+    metadata = %{
+      pts: convert_seconds_to_time(segment.from),
+      byte_size: byte_size(payload),
+      latency: latency,
+      uri: uri
+    }
+
+    {notifications, builder} =
+      case response do
+        :ok ->
+          {[notify_parent: {:segment, :write, :ok, metadata}],
+           Builder.ack(state.builder, segment.ref)}
+
+        {:error, reason} ->
+          {[notify_parent: {:segment, :write, {:error, reason}, metadata}],
+           Builder.nack(state.builder, segment.ref)}
+      end
+
+    {notifications, %{state | builder: builder}}
   end
 
   defp convert_seconds_to_time(seconds) do
     (seconds * 1_000_000_000)
     |> trunc()
     |> Membrane.Time.nanoseconds()
-  end
-
-  defp buffer_to_timed_payload(%Buffer{
-         pts: pts,
-         payload: payload,
-         metadata: %{duration: duration}
-       }) do
-    from = convert_time_to_seconds(pts)
-    %{from: from, to: from + convert_time_to_seconds(duration), payload: payload}
   end
 end
