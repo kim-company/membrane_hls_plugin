@@ -105,7 +105,7 @@ defmodule Membrane.HLS.Sink do
     {segment_actions, state} = write_next_segment(state)
 
     if SCB.is_empty?(state.content_builder) do
-      {playlist_actions, state} = write_playlist(state)
+      {playlist_actions, state} = write_playlist(state, true)
       {acc ++ segment_actions ++ playlist_actions, state}
     else
       flush_and_write_playlist(state, acc ++ segment_actions)

@@ -57,82 +57,32 @@ defmodule Membrane.HLS.SinkTest do
       assert [
                {URI.new!("s3://bucket/media/00000.txt"), "a"},
                {URI.new!("s3://bucket/media.m3u8"),
-                "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/00000.txt\n"}
+                "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/00000.txt\n#EXT-X-ENDLIST\n"}
              ] == Support.Writer.history(writer, 2)
     end
 
-    # test "writes pending segments at EOS, the plalist is finished", %{
-    #   playlist: playlist,
-    #   writer: writer
-    # } do
-    #   buffers = [
-    #     %Buffer{
-    #       payload: "a",
-    #       pts: 0,
-    #       metadata: %{duration: Membrane.Time.milliseconds(50)}
-    #     }
-    #   ]
+    test "in case of failure an empty segment replaces the failing upload", %{playlist: playlist} do
+      writer = Support.Writer.new(fail: true)
 
-    #   links = build_links(playlist, writer, buffers)
-    #   pipeline = Membrane.Testing.Pipeline.start_link_supervised!(structure: links)
+      buffers = [
+        %Buffer{
+          payload: "a",
+          pts: 0,
+          metadata: %{duration: Membrane.Time.seconds(1)}
+        }
+      ]
 
-    #   assert_end_of_stream(pipeline, :sink, :input, 200)
-    #   :ok = Membrane.Pipeline.terminate(pipeline, blocking?: true)
+      links = build_links(playlist, writer, buffers)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(structure: links)
 
-    #   assert [
-    #            {URI.new!("s3://bucket/media/00000.txt"), "a"},
-    #            {URI.new!("s3://bucket/media.m3u8"),
-    #             "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/00000.txt\n#EXT-X-ENDLIST\n"}
-    #          ] == Support.Writer.history(writer, 2)
-    # end
+      assert_end_of_stream(pipeline, :sink, :input, 200)
+      :ok = Membrane.Pipeline.terminate(pipeline, blocking?: true)
 
-    # test "in case of failure an empty segment replaces the failing upload", %{playlist: playlist} do
-    #   writer = Support.Writer.new(fail: true)
-
-    #   buffers = [
-    #     %Buffer{
-    #       payload: "a",
-    #       pts: 0,
-    #       metadata: %{duration: Membrane.Time.seconds(1)}
-    #     }
-    #   ]
-
-    #   links = build_links(playlist, writer, buffers)
-    #   pipeline = Membrane.Testing.Pipeline.start_link_supervised!(structure: links)
-
-    #   assert_end_of_stream(pipeline, :sink, :input, 200)
-    #   :ok = Membrane.Pipeline.terminate(pipeline, blocking?: true)
-
-    #   assert [
-    #            {URI.new!("s3://bucket/media/00000.txt"), "a"},
-    #            {URI.new!("s3://bucket/media.m3u8"),
-    #             "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/empty.txt\n"}
-    #          ] == Support.Writer.history(writer, 2)
-    # end
-
-    # test "empty buffers are replaced with the empty segment", %{
-    #   playlist: playlist,
-    #   writer: writer
-    # } do
-    #   buffers = [
-    #     %Buffer{
-    #       payload: <<>>,
-    #       pts: 0,
-    #       metadata: %{duration: Membrane.Time.seconds(1)}
-    #     }
-    #   ]
-
-    #   links = build_links(playlist, writer, buffers)
-    #   pipeline = Membrane.Testing.Pipeline.start_link_supervised!(structure: links)
-
-    #   assert_end_of_stream(pipeline, :sink, :input, 200)
-    #   :ok = Membrane.Pipeline.terminate(pipeline, blocking?: true)
-
-    #   assert [
-    #            {URI.new!("s3://bucket/media/empty.txt"), ""},
-    #            {URI.new!("s3://bucket/media.m3u8"),
-    #             "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/empty.txt\n"}
-    #          ] == Support.Writer.history(writer, 2)
-    # end
+      assert [
+               {URI.new!("s3://bucket/media/00000.txt"), "a"},
+               {URI.new!("s3://bucket/media.m3u8"),
+                "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\nmedia/empty.txt\n#EXT-X-ENDLIST\n"}
+             ] == Support.Writer.history(writer, 2)
+    end
   end
 end
