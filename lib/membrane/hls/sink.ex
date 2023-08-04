@@ -26,6 +26,11 @@ defmodule Membrane.HLS.Sink do
       spec: SegmentContentBuilder.t(),
       description:
         "SegmentContentBuilder implementation that takes care of putting buffers in the right segments."
+    ],
+    write_empty_segment_on_startup: [
+      spec: boolean(),
+      description: "If true, the component will write the empty segment at startup",
+      default: false
     ]
   )
 
@@ -49,16 +54,21 @@ defmodule Membrane.HLS.Sink do
       |> convert_seconds_to_time()
       |> Membrane.Time.round_to_milliseconds()
 
-    {[],
-     %{
-       playlist: opts.playlist,
-       writer: opts.writer,
-       content_builder: opts.segment_content_builder,
-       builder: builder,
-       safety_delay: opts.safety_delay,
-       interval: segment_duration_ms,
-       timer: nil
-     }}
+    state = %{
+      playlist: opts.playlist,
+      writer: opts.writer,
+      content_builder: opts.segment_content_builder,
+      builder: builder,
+      safety_delay: opts.safety_delay,
+      interval: segment_duration_ms,
+      timer: nil
+    }
+
+    if opts.write_empty_segment_on_startup do
+      write_initial_empty_segment(state)
+    else
+      {[], state}
+    end
   end
 
   @impl true
@@ -77,6 +87,8 @@ defmodule Membrane.HLS.Sink do
 
   @impl true
   def handle_parent_notification({:start, playback}, _ctx, state) do
+    if state.timer != nil, do: Process.cancel_timer(state.timer)
+
     {segments, builder} = Builder.sync(state.builder, Membrane.Time.round_to_seconds(playback))
     state = %{state | builder: builder}
 
@@ -140,7 +152,9 @@ defmodule Membrane.HLS.Sink do
         segment_actions,
         unless(Enum.empty?(late_buffers),
           do: [
-            notify_parent: {:segment, :write, {:error, :late_buffers}, %{buffers: late_buffers}}
+            notify_parent:
+              {:segment, :write, {:error, :late_buffers},
+               %{buffers: late_buffers, uri: segment.uri}}
           ],
           else: []
         )
@@ -189,6 +203,30 @@ defmodule Membrane.HLS.Sink do
     {notifications, state}
   end
 
+  defp write_initial_empty_segment(state) do
+    uri =
+      Playlist.Media.build_segment_uri(
+        state.playlist.uri,
+        Builder.empty_segment_uri(state.builder)
+      )
+
+    payload = SCB.format_segment(state.content_builder, [])
+    response = HLS.FS.Writer.write(state.writer, uri, payload)
+
+    metadata = %{uri: uri}
+
+    notifications =
+      case response do
+        :ok ->
+          [notify_parent: {:empty_segment, :write, :ok, metadata}]
+
+        {:error, reason} ->
+          [notify_parent: {:empty_segment, :write, {:error, reason}, metadata}]
+      end
+
+    {notifications, state}
+  end
+
   defp write_and_ack(buffers, segment, state) do
     start_at = DateTime.utc_now()
     playlist_uri = Builder.playlist(state.builder).uri
@@ -204,14 +242,15 @@ defmodule Membrane.HLS.Sink do
       uri: uri
     }
 
+    id = if Enum.empty?(buffers), do: :empty_segment, else: :segment
+
     {notifications, builder} =
       case response do
         :ok ->
-          {[notify_parent: {:segment, :write, :ok, metadata}],
-           Builder.ack(state.builder, segment.ref)}
+          {[notify_parent: {id, :write, :ok, metadata}], Builder.ack(state.builder, segment.ref)}
 
         {:error, reason} ->
-          {[notify_parent: {:segment, :write, {:error, reason}, metadata}],
+          {[notify_parent: {id, :write, {:error, reason}, metadata}],
            Builder.nack(state.builder, segment.ref)}
       end
 
