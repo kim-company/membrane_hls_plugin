@@ -247,7 +247,8 @@ defmodule Membrane.HLS.Sink do
     {notifications, builder} =
       case response do
         :ok ->
-          {[notify_parent: {id, :write, :ok, metadata}], Builder.ack(state.builder, segment.ref)}
+          {[notify_parent: {id, :write, :ok, metadata}],
+           Builder.ack(state.builder, segment.ref, Enum.empty?(buffers))}
 
         {:error, reason} ->
           {[notify_parent: {id, :write, {:error, reason}, metadata}],
