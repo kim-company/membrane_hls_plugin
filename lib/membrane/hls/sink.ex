@@ -44,6 +44,11 @@ defmodule Membrane.HLS.Sink do
         replace_empty_segments_uri: true
       )
 
+    segment_duration_ms =
+      opts.playlist.target_segment_duration
+      |> convert_seconds_to_time()
+      |> Membrane.Time.round_to_milliseconds()
+
     {[],
      %{
        playlist: opts.playlist,
@@ -51,6 +56,7 @@ defmodule Membrane.HLS.Sink do
        content_builder: opts.segment_content_builder,
        builder: builder,
        safety_delay: opts.safety_delay,
+       interval: segment_duration_ms,
        timer: nil
      }}
   end
@@ -80,8 +86,9 @@ defmodule Membrane.HLS.Sink do
         {actions ++ new_actions, state}
       end)
 
-    interval = state.safety_delay + Builder.playlist(state.builder).target_segment_duration
-    timer = Process.send_after(self(), :sync, Membrane.Time.round_to_milliseconds(interval))
+    interval = Membrane.Time.round_to_milliseconds(state.safety_delay) + state.interval
+
+    timer = Process.send_after(self(), :sync, interval)
     state = %{state | timer: timer}
 
     {playlist_actions, state} =
@@ -143,10 +150,7 @@ defmodule Membrane.HLS.Sink do
   end
 
   defp reload_sync_timer(state) do
-    interval = Builder.playlist(state.builder).target_segment_duration
-    timer = Process.send_after(self(), :sync, Membrane.Time.round_to_milliseconds(interval))
-
-    %{state | timer: timer}
+    %{state | timer: Process.send_after(self(), :sync, state.interval)}
   end
 
   defp write_playlist(state, finished? \\ false) do
@@ -215,8 +219,8 @@ defmodule Membrane.HLS.Sink do
   end
 
   defp convert_seconds_to_time(seconds) do
-    (seconds * 1_000_000_000)
+    (seconds * 1_000)
     |> trunc()
-    |> Membrane.Time.nanoseconds()
+    |> Membrane.Time.milliseconds()
   end
 end
