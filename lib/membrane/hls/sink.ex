@@ -89,6 +89,10 @@ defmodule Membrane.HLS.Sink do
   def handle_parent_notification({:start, playback}, _ctx, state) do
     if state.timer != nil, do: Process.cancel_timer(state.timer)
 
+    Membrane.Logger.info(
+      "Syncing playlist #{URI.to_string(state.playlist.uri)} @ #{Membrane.Time.pretty_duration(playback)}"
+    )
+
     {segments, builder} = Builder.sync(state.builder, Membrane.Time.round_to_seconds(playback))
     state = %{state | builder: builder}
 
