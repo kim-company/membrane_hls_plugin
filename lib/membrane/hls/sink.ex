@@ -154,7 +154,7 @@ defmodule Membrane.HLS.Sink do
           do: [
             notify_parent:
               {:segment, :write, {:error, :late_buffers},
-               %{buffers: late_buffers, uri: segment.uri}}
+               %{buffers: late_buffers, uri: segment.uri, segment: segment}}
           ],
           else: []
         )
