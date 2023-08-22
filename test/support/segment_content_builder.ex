@@ -35,5 +35,8 @@ defimpl Membrane.HLS.SegmentContentBuilder, for: Support.SegmentContentBuilder d
   end
 
   @impl true
+  def flush(state), do: state
+
+  @impl true
   def is_empty?(state), do: Enum.empty?(state.acc)
 end
