@@ -125,7 +125,7 @@ defmodule Membrane.HLS.Sink do
   def handle_end_of_stream(_pad, _ctx, state) do
     if state.timer != nil, do: Process.cancel_timer(state.timer)
 
-    flush_and_write_playlist(%{state | content_builder: SCB.flush(state.content_builder)}, [])
+    flush_and_write_playlist(state, [])
   end
 
   defp flush_and_write_playlist(state, acc) do
