@@ -125,11 +125,12 @@ defmodule Membrane.HLS.Sink do
   def handle_end_of_stream(_pad, _ctx, state) do
     if state.timer != nil, do: Process.cancel_timer(state.timer)
 
-    flush_and_write_playlist(state, [])
+    {actions, state} = flush_and_write_playlist(state, [])
+    {actions ++ [notify_parent: :end_of_stream], state}
   end
 
   defp flush_and_write_playlist(state, acc) do
-    {segment_actions, state} = write_next_segment(state)
+    {segment_actions, state} = write_next_segment(state, true)
 
     if SCB.is_empty?(state.content_builder) do
       {playlist_actions, state} = write_playlist(state, true)
@@ -139,11 +140,14 @@ defmodule Membrane.HLS.Sink do
     end
   end
 
-  defp write_next_segment(state) do
+  defp write_next_segment(state, disable_pending \\ false) do
     {segment, builder} = Builder.next_segment(state.builder)
 
     {content_builder, late_buffers} = SCB.drop_late_buffers(state.content_builder, segment)
-    {content_builder, buffers} = SCB.drop_buffers_in_segment(content_builder, segment)
+
+    {content_builder, buffers} =
+      SCB.drop_buffers_in_segment(content_builder, segment, disable_pending)
+
     state = %{state | content_builder: content_builder, builder: builder}
 
     segment =
