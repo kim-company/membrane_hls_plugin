@@ -28,7 +28,7 @@ defimpl Membrane.HLS.SegmentContentBuilder, for: Support.SegmentContentBuilder d
   end
 
   @impl true
-  def drop_buffers_in_segment(state, segment) do
+  def drop_buffers_in_segment(state, segment, _) do
     to = Membrane.Time.seconds(ceil(segment.from + segment.duration))
     {future, valid} = Enum.split_while(state.acc, fn buffer -> buffer.pts > to end)
     {%SCB{acc: future}, valid}
