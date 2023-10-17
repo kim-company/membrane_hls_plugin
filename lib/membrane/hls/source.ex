@@ -1,7 +1,6 @@
 defmodule Membrane.HLS.Source do
   use Membrane.Source
 
-  alias HLS.Helper
   alias HLS.FS.Reader
   alias HLS.Playlist.Media.Tracker
   alias HLS.Playlist
@@ -46,7 +45,7 @@ defmodule Membrane.HLS.Source do
   @impl true
   def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _, state) do
     {:ok, pid} = Tracker.start_link(state.reader)
-    target = Helper.merge_uri(state.master_playlist_uri, rendition.uri)
+    target = build_target(rendition, state.master_playlist_uri)
     ref = Tracker.follow(pid, target)
 
     config = %{
@@ -227,8 +226,13 @@ defmodule Membrane.HLS.Source do
 
   defp start_download(tracker, _reader), do: tracker
 
-  defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
-  defp build_target(%HLS.VariantStream{uri: uri}), do: uri
+  defp build_target(%{uri: uri}, master_uri) do
+    if is_nil(uri.host) and not is_nil(master_uri.host) do
+      URI.merge(master_uri, uri)
+    else
+      uri
+    end
+  end
 
   defp build_stream_format(%HLS.VariantStream{codecs: codecs}), do: %Format.MPEG{codecs: codecs}
 
