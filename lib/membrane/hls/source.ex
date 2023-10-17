@@ -1,6 +1,7 @@
 defmodule Membrane.HLS.Source do
   use Membrane.Source
 
+  alias HLS.Helper
   alias HLS.FS.Reader
   alias HLS.Playlist.Media.Tracker
   alias HLS.Playlist
@@ -45,7 +46,7 @@ defmodule Membrane.HLS.Source do
   @impl true
   def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _, state) do
     {:ok, pid} = Tracker.start_link(state.reader)
-    target = build_target(rendition)
+    target = Helper.merge_uri(state.master_playlist_uri, rendition.uri)
     ref = Tracker.follow(pid, target)
 
     config = %{
