@@ -36,9 +36,7 @@ defmodule Membrane.HLS.Sink do
 
   def_input_pad(:input,
     accepted_format: _any,
-    availability: :always,
-    demand_mode: :auto,
-    mode: :pull
+    availability: :always
   )
 
   @impl true
@@ -72,7 +70,7 @@ defmodule Membrane.HLS.Sink do
   end
 
   @impl true
-  def handle_write(_pad, buffer, _ctx, state) do
+  def handle_buffer(_pad, buffer, _ctx, state) do
     state = update_in(state, [:content_builder], &SCB.accept_buffer(&1, buffer))
     {[], state}
   end
@@ -93,7 +91,7 @@ defmodule Membrane.HLS.Sink do
       "Syncing playlist #{URI.to_string(state.playlist.uri)} @ #{Membrane.Time.pretty_duration(playback)}"
     )
 
-    {segments, builder} = Builder.sync(state.builder, Membrane.Time.round_to_seconds(playback))
+    {segments, builder} = Builder.sync(state.builder, Membrane.Time.as_seconds(playback, :round))
     state = %{state | builder: builder}
 
     {segment_actions, state} =
