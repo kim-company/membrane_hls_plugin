@@ -42,11 +42,11 @@ defmodule Membrane.HLS.SinkTest do
       ]
 
       links = build_links(playlist, writer, buffers)
-      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(structure: links)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: links)
       Membrane.Testing.Pipeline.execute_actions(pipeline, notify_child: {:sink, {:start, 0}})
 
       assert_end_of_stream(pipeline, :sink, :input)
-      :ok = Membrane.Pipeline.terminate(pipeline, blocking?: true)
+      :ok = Membrane.Pipeline.terminate(pipeline)
 
       refute_pipeline_notified(
         pipeline,
@@ -73,10 +73,10 @@ defmodule Membrane.HLS.SinkTest do
       ]
 
       links = build_links(playlist, writer, buffers)
-      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(structure: links)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: links)
 
       assert_end_of_stream(pipeline, :sink, :input, 200)
-      :ok = Membrane.Pipeline.terminate(pipeline, blocking?: true)
+      :ok = Membrane.Pipeline.terminate(pipeline)
 
       assert [
                {URI.new!("s3://bucket/media/00000.txt"), "a"},

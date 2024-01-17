@@ -13,7 +13,7 @@ defmodule Membrane.HLS.Source do
   require Membrane.Logger
 
   def_output_pad(:output,
-    mode: :pull,
+    flow_control: :manual,
     availability: :on_request,
     accepted_format:
       %Membrane.RemoteStream{content_format: %format{}}
@@ -103,9 +103,9 @@ defmodule Membrane.HLS.Source do
         {[{:notify_parent, {:hls_master_playlist, playlist}}], state}
 
       {:error, reason} ->
-        Membrane.Logger.warn("Master playlist check failed: #{inspect(reason)}")
+        Membrane.Logger.warning("Master playlist check failed: #{inspect(reason)}")
 
-        Membrane.Logger.warn(
+        Membrane.Logger.warning(
           "Master playlist check attempt scheduled in #{@master_check_retry_interval_ms}ms"
         )
 
@@ -144,7 +144,7 @@ defmodule Membrane.HLS.Source do
           %{tracker | ready: ready, download: nil}
 
         {:error, message} ->
-          Membrane.Logger.warn(
+          Membrane.Logger.warning(
             "HLS could not get segment #{inspect(segment.uri)}: #{inspect(message)}"
           )
 
@@ -160,7 +160,9 @@ defmodule Membrane.HLS.Source do
     {pad, tracker} = tracker_by_task_ref!(state.pad_to_tracker, task_ref)
     segment = tracker.download.segment
 
-    Membrane.Logger.warn("HLS could not get segment #{inspect(segment.uri)}: #{inspect(reason)}")
+    Membrane.Logger.warning(
+      "HLS could not get segment #{inspect(segment.uri)}: #{inspect(reason)}"
+    )
 
     tracker =
       tracker

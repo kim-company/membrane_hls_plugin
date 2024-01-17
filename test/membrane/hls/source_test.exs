@@ -18,7 +18,7 @@ defmodule Membrane.HLS.SourceTest do
         child(:source, %Source{reader: reader, master_playlist_uri: uri})
       ]
 
-      {[{:spec, structure}, {:playback, :playing}], opts}
+      {[spec: structure], opts}
     end
 
     def handle_child_notification({:hls_master_playlist, master}, :source, _ctx, state) do
@@ -56,7 +56,7 @@ defmodule Membrane.HLS.SourceTest do
 
       pipeline = Membrane.Testing.Pipeline.start_link_supervised!(options)
       assert_pipeline_notified(pipeline, :source, {:hls_master_playlist, %Master{}})
-      Membrane.Testing.Pipeline.terminate(pipeline, blocking?: true)
+      Membrane.Testing.Pipeline.terminate(pipeline)
     end
 
     test "provides all segments of selected rendition" do
@@ -97,7 +97,7 @@ defmodule Membrane.HLS.SourceTest do
       |> Enum.each(&assert_sink_buffer(pipeline, :sink, %Membrane.Buffer{payload: &1}, 5_000))
 
       assert_end_of_stream(pipeline, :sink)
-      Membrane.Testing.Pipeline.terminate(pipeline, blocking?: true)
+      Membrane.Testing.Pipeline.terminate(pipeline)
     end
   end
 end
