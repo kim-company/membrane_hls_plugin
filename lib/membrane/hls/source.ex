@@ -1,7 +1,7 @@
 defmodule Membrane.HLS.Source do
   use Membrane.Source
 
-  alias HLS.FS.Reader
+  alias Membrane.HLS.Reader
   alias HLS.Playlist.Media.Tracker
   alias HLS.Playlist
   alias HLS.Playlist.Master
@@ -22,7 +22,7 @@ defmodule Membrane.HLS.Source do
 
   def_options(
     reader: [
-      spec: HLS.FS.Reader.t(),
+      spec: Reader.t(),
       description: "HLS.Reader implementation used to obtain playlist's contents"
     ],
     master_playlist_uri: [
@@ -44,7 +44,12 @@ defmodule Membrane.HLS.Source do
 
   @impl true
   def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _, state) do
-    {:ok, pid} = Tracker.start_link(state.reader)
+    {:ok, pid} =
+      Tracker.start_link(fn uri ->
+        {:ok, data} = Reader.read(state.reader, uri)
+        data
+      end)
+
     target = build_target(rendition)
     ref = Tracker.follow(pid, target)
 

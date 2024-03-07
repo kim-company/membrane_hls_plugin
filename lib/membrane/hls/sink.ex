@@ -4,6 +4,7 @@ defmodule Membrane.HLS.Sink do
   alias Membrane.HLS.SegmentContentBuilder, as: SCB
   alias HLS.{Playlist, Segment}
   alias HLS.Playlist.Media.Builder
+  alias Membrane.HLS.Writer
 
   require Membrane.Logger
 
@@ -13,7 +14,7 @@ defmodule Membrane.HLS.Sink do
       description: "Media playlist tracking the segments"
     ],
     writer: [
-      spec: HLS.FS.Writer.t(),
+      spec: Writer.t(),
       description: "Writer implementation that takes care of storing segments and playlist"
     ],
     safety_delay: [
@@ -198,7 +199,7 @@ defmodule Membrane.HLS.Sink do
       end
 
     start_at = DateTime.utc_now()
-    response = HLS.FS.Writer.write(state.writer, playlist.uri, payload)
+    response = Writer.write(state.writer, playlist.uri, payload)
     latency = DateTime.diff(DateTime.utc_now(), start_at, :nanosecond)
 
     metadata = %{
@@ -228,7 +229,7 @@ defmodule Membrane.HLS.Sink do
       )
 
     payload = SCB.format_segment(state.content_builder, [])
-    response = HLS.FS.Writer.write(state.writer, uri, payload)
+    response = Writer.write(state.writer, uri, payload)
 
     metadata = %{uri: uri}
 
@@ -249,7 +250,7 @@ defmodule Membrane.HLS.Sink do
     playlist_uri = Builder.playlist(state.builder).uri
     uri = Playlist.Media.build_segment_uri(playlist_uri, segment.uri)
     payload = SCB.format_segment(state.content_builder, buffers)
-    response = HLS.FS.Writer.write(state.writer, uri, payload)
+    response = Writer.write(state.writer, uri, payload)
     latency = DateTime.diff(DateTime.utc_now(), start_at, :nanosecond)
 
     metadata = %{

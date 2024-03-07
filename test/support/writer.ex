@@ -16,7 +16,7 @@ defmodule Support.Writer do
   end
 end
 
-defimpl HLS.FS.Writer, for: Support.Writer do
+defimpl Membrane.HLS.Writer, for: Support.Writer do
   @impl true
   def write(%Support.Writer{agent: pid}, uri, binary, _opts) do
     Agent.update(pid, fn state = %{acc: acc} ->

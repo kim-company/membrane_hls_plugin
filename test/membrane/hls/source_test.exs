@@ -3,7 +3,6 @@ defmodule Membrane.HLS.SourceTest do
 
   alias Membrane.HLS.Source
   alias HLS.Playlist.Master
-  alias HLS.FS.OS
 
   import Membrane.Testing.Assertions
 
@@ -48,7 +47,7 @@ defmodule Membrane.HLS.SourceTest do
       options = [
         module: Pipeline,
         custom_args: %{
-          reader: OS.new(),
+          reader: %Support.Reader{},
           master_playlist_uri: @master_playlist_uri,
           stream_selector: fn _ -> false end
         }
@@ -71,7 +70,7 @@ defmodule Membrane.HLS.SourceTest do
       options = [
         module: Pipeline,
         custom_args: %{
-          reader: OS.new(),
+          reader: %Support.Reader{},
           master_playlist_uri: @master_playlist_uri,
           stream_selector: fn stream -> stream.uri == target_stream_uri end
         },
