@@ -94,7 +94,7 @@ defmodule Membrane.HLS.SourceTest do
       |> File.ls!()
       |> Enum.map(&Path.join([base_dir, &1]))
       |> Enum.map(&File.read!/1)
-      |> Enum.each(&assert_sink_buffer(pipeline, :sink, %Membrane.Buffer{payload: &1}, 5_000))
+      |> Enum.each(&assert_sink_buffer(pipeline, :sink, %Membrane.Buffer{payload: ^&1}, 5_000))
 
       assert_end_of_stream(pipeline, :sink)
       Membrane.Testing.Pipeline.terminate(pipeline)
