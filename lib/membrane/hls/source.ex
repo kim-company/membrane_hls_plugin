@@ -54,6 +54,7 @@ defmodule Membrane.HLS.Source do
     ref = Tracker.follow(pid, target)
 
     config = %{
+      media_uri: target,
       tracking: ref,
       tracker: pid,
       ready: Q.new("hls-ready-#{rendition.uri.path}"),
@@ -128,7 +129,7 @@ defmodule Membrane.HLS.Source do
     tracker =
       tracker
       |> Map.update!(:pending, &Q.push(&1, segment))
-      |> start_download(state)
+      |> start_download(state.reader)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
     {[], state}
@@ -156,7 +157,7 @@ defmodule Membrane.HLS.Source do
           %{tracker | download: nil}
       end
 
-    tracker = start_download(tracker, state)
+    tracker = start_download(tracker, state.reader)
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
     {[{:redemand, pad}], state}
   end
@@ -172,7 +173,7 @@ defmodule Membrane.HLS.Source do
     tracker =
       tracker
       |> Map.replace!(:download, nil)
-      |> start_download(state)
+      |> start_download(state.reader)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
@@ -214,10 +215,7 @@ defmodule Membrane.HLS.Source do
     tracker || raise "tracker with task reference #{inspect(task_ref)} not found"
   end
 
-  defp start_download(%{download: nil} = tracker, %{
-         reader: reader,
-         master_playlist_uri: master_playlist_uri
-       }) do
+  defp start_download(%{download: nil, media_uri: media_uri} = tracker, reader) do
     case Q.pop(tracker.pending) do
       {{:value, segment}, queue} ->
         Membrane.Logger.debug("Starting download of segment: #{inspect(segment)}")
@@ -226,7 +224,7 @@ defmodule Membrane.HLS.Source do
           Task.Supervisor.async_nolink(TaskSupervisor, fn ->
             Reader.read(
               reader,
-              Playlist.build_absolute_uri(master_playlist_uri, segment.uri)
+              Playlist.build_absolute_uri(media_uri, segment.uri)
             )
           end)
 
