@@ -61,18 +61,16 @@ defmodule Membrane.HLS.SourceTest do
     test "provides all segments of selected rendition" do
       stream_name = "stream_416x234"
 
-      target_stream_uri =
-        HLS.Playlist.Master.build_media_uri(
-          @master_playlist_uri,
-          URI.new!(stream_name <> ".m3u8")
-        )
+      target_stream_uri = URI.new!(stream_name <> ".m3u8")
 
       options = [
         module: Pipeline,
         custom_args: %{
           reader: %Support.Reader{},
           master_playlist_uri: @master_playlist_uri,
-          stream_selector: fn stream -> stream.uri == target_stream_uri end
+          stream_selector: fn stream ->
+            stream.uri == target_stream_uri
+          end
         },
         test_process: self()
       ]

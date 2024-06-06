@@ -50,7 +50,7 @@ defmodule Membrane.HLS.Source do
         data
       end)
 
-    target = build_target(rendition)
+    target = Playlist.build_absolute_uri(state.master_playlist_uri, extract_uri(rendition))
     ref = Tracker.follow(pid, target)
 
     config = %{
@@ -128,7 +128,7 @@ defmodule Membrane.HLS.Source do
     tracker =
       tracker
       |> Map.update!(:pending, &Q.push(&1, segment))
-      |> start_download(state.reader)
+      |> start_download(state)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
     {[], state}
@@ -156,7 +156,7 @@ defmodule Membrane.HLS.Source do
           %{tracker | download: nil}
       end
 
-    tracker = start_download(tracker, state.reader)
+    tracker = start_download(tracker, state)
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
     {[{:redemand, pad}], state}
   end
@@ -172,7 +172,7 @@ defmodule Membrane.HLS.Source do
     tracker =
       tracker
       |> Map.replace!(:download, nil)
-      |> start_download(state.reader)
+      |> start_download(state)
 
     state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
 
@@ -214,14 +214,20 @@ defmodule Membrane.HLS.Source do
     tracker || raise "tracker with task reference #{inspect(task_ref)} not found"
   end
 
-  defp start_download(%{download: nil} = tracker, reader) do
+  defp start_download(%{download: nil} = tracker, %{
+         reader: reader,
+         master_playlist_uri: master_playlist_uri
+       }) do
     case Q.pop(tracker.pending) do
       {{:value, segment}, queue} ->
         Membrane.Logger.debug("Starting download of segment: #{inspect(segment)}")
 
         task =
           Task.Supervisor.async_nolink(TaskSupervisor, fn ->
-            Reader.read(reader, segment.uri)
+            Reader.read(
+              reader,
+              Playlist.build_absolute_uri(master_playlist_uri, segment.uri)
+            )
           end)
 
         %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}
@@ -233,8 +239,8 @@ defmodule Membrane.HLS.Source do
 
   defp start_download(tracker, _reader), do: tracker
 
-  defp build_target(%HLS.AlternativeRendition{uri: uri}), do: uri
-  defp build_target(%HLS.VariantStream{uri: uri}), do: uri
+  defp extract_uri(%HLS.AlternativeRendition{uri: uri}), do: uri
+  defp extract_uri(%HLS.VariantStream{uri: uri}), do: uri
 
   defp build_stream_format(%HLS.VariantStream{codecs: codecs}), do: %Format.MPEG{codecs: codecs}
 
