@@ -8,8 +8,7 @@ defmodule Membrane.HLS.SinkBin do
   The type of stream has to be specified via the pad's `:encoding` option.
   """
   use Membrane.Bin
-  require Logger
-  alias Membrane.HLS.Storage
+  # alias Membrane.HLS.Storage
 
   def_options(
     base_manifest_uri: [
@@ -74,14 +73,7 @@ defmodule Membrane.HLS.SinkBin do
 
   @impl true
   def handle_setup(_context, state) do
-    # TODO: read the files on the storage for restoration?
-
-    case Storage.get(state.opts.storage, "#{state.opts.base_manifest_uri}.m3u8") do
-      {:ok, playlist} ->
-        # should be a master playlist, right?
-        nil
-    end
-
+    # TODO: read the files on the storage and initialize some kind of writer which has a timer?
     {[], state}
   end
 
@@ -92,7 +84,7 @@ defmodule Membrane.HLS.SinkBin do
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: state.opts.segment_duration
       })
-      |> child({:sink, track_id}, %Membrane.Debug.Sink{handle_buffer: &IO.inspect/1})
+      |> child({:sink, track_id}, Membrane.Debug.Sink)
     ]
 
     {[spec: spec], state}
@@ -111,15 +103,15 @@ defmodule Membrane.HLS.SinkBin do
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: state.opts.segment_duration
       })
-      |> child({:sink, track_id}, %Membrane.Debug.Sink{handle_buffer: &IO.inspect/1})
+      |> child({:sink, track_id}, Membrane.Debug.Sink)
     ]
 
     {[spec: spec], state}
   end
 
-  # @impl true
-  # def handle_playing(_context, state) do
-  #   # TODO: check that playlists from the storage match the assigned inputs and define the start_pts (max of all playlists) how many bytes we need to add.
-  #   {[], state}
-  # end
+  @impl true
+  def handle_playing(_context, state) do
+    # TODO: check that playlists from the storage match the assigned inputs and define the start_pts (max of all playlists) how many bytes we need to add.
+    {[], state}
+  end
 end

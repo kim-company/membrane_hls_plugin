@@ -10,7 +10,7 @@ defmodule Membrane.HLS.SinkBinTest do
         base_manifest_uri: "s3://bucket/stream",
         segment_duration: Membrane.Time.seconds(4),
         outputs: :manifests_and_segments,
-        storage: %Membrane.HLS.Storage.Send{pid: self()}
+        storage: Membrane.HLS.Storage.File.new()
       }),
       # Audio
       child(:aac_source, %Membrane.File.Source{
@@ -37,8 +37,9 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
-
-    :ok = Membrane.Pipeline.terminate(pipeline, timeout: 15_000)
-    assert_end_of_stream(pipeline, :sink, :input)
+    assert_end_of_stream(pipeline, :aac_parser, :input, 5_000)
+    # todo: how are we sure that all the files have been written?
+    Process.sleep(1000)
+    :ok = Membrane.Pipeline.terminate(pipeline)
   end
 end

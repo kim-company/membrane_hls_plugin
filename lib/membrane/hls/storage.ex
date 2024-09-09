@@ -2,11 +2,33 @@ defprotocol Membrane.HLS.Storage do
   @spec get(Membrane.HLS.Storage.t(), URI.t()) :: {:ok, binary()} | {:error, any()}
   def get(storage, uri)
 
-  @spec list(Membrane.HLS.Storage.t(), URI.t()) :: {:ok, [URI.t()]} | {:error, any()}
+  @spec list(Membrane.HLS.Storage.t(), URI.t()) :: {:ok, Enumerable.t(URI.t())} | {:error, any()}
   def list(storage, uri)
 
   @spec store(Membrane.HLS.Storage.t(), URI.t(), binary()) :: :ok | {:error, any()}
   def store(storage, uri, binary)
+end
+
+defmodule Membrane.HLS.Storage.File do
+  defstruct []
+
+  def new(), do: %__MODULE__{}
+
+  def get(_storage, uri) do
+    File.read(to_path(uri))
+  end
+
+  def list(_storage, uri) do
+    File.ls(to_path(uri))
+  end
+
+  def store(_storage, uri, binary) do
+    File.write(to_path(uri), binary)
+  end
+
+  defp to_path(%URI{scheme: "file"} = uri) do
+    Path.join(uri.host, uri.path)
+  end
 end
 
 defmodule Membrane.HLS.Storage.S3 do
