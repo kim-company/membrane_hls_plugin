@@ -24,9 +24,14 @@ defmodule Membrane.HLS.MixProject do
   defp deps do
     [
       {:membrane_core, "~> 1.0"},
-      {:membrane_file_plugin, "~> 0.16.0", only: :test},
+      {:membrane_mp4_plugin, "~> 0.35.0"},
+      {:membrane_aac_plugin, "~> 0.18.0"},
+      {:membrane_h26x_plugin, "~> 0.10.2"},
+      {:membrane_file_plugin, "~> 0.17.0"},
       {:kim_hls, github: "kim-company/kim_hls"},
-      {:kim_q, github: "kim-company/kim_q"}
+      {:kim_q, github: "kim-company/kim_q"},
+      {:req, "~> 0.5.6"},
+      {:req_s3, "~> 0.2.3"}
     ]
   end
 

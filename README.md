@@ -38,6 +38,14 @@ difficult to add the source functionality there because the playlist,
 renditions and HLS protocol details were mixed with memebrane's sink
 functionality. We would like to merge the two.
 
+### Notes about the HLS SinkBin:
+Each sink writes segments as fast as the input comes in.
+Sink notifies the parent about the written chunks and the parent decides when to:
+  * Write the master playlist
+  * Update the child playlists
+This is necessary in order to keep all child playlists in-sync even if one of the streams is far ahead the other streams.
+The SinkBin checks if the playlists already exist on the storage and is able to continue the stream by writing empty segments in some outputs.
+
 ## Copyright and License
 Copyright 2022, [KIM Keep In Mind GmbH](https://www.keepinmind.info/)
 Licensed under the [Apache License, Version 2.0](LICENSE)
