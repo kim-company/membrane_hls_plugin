@@ -6,14 +6,13 @@ defmodule Membrane.HLS.SinkBinTest do
 
   @tag :tmp_dir
   test "on a new stream", %{tmp_dir: tmp_dir} do
-    IO.inspect(tmp_dir)
-
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
-        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
+        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
         segment_duration: Membrane.Time.seconds(4),
         storage: HLS.Storage.File.new()
       }),
+
       # Audio
       child(:aac_source, %Membrane.File.Source{
         location: "test/fixtures/samples_big-buck-bunny_bun33s.aac"
@@ -38,6 +37,7 @@ defmodule Membrane.HLS.SinkBinTest do
         ]
       )
       |> get_child(:sink),
+
       # Video
       child(:h264_source, %Membrane.File.Source{
         location: "test/fixtures/samples_big-buck-bunny_bun33s_720x480.h264"

@@ -103,7 +103,7 @@ defmodule Membrane.HLS.SinkBin do
     ended_sinks = MapSet.put(state.ended_sinks, sink)
 
     if MapSet.equal?(all_sinks, ended_sinks) do
-      Agent.update(state.packager_pid, fn packager -> Packager.flush(packager) end)
+      Agent.update(state.packager_pid, &Packager.flush(&1))
       {[notify_parent: :end_of_stream], %{state | ended_sinks: ended_sinks}}
     else
       {[], %{state | ended_sinks: ended_sinks}}

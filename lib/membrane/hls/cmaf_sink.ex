@@ -40,7 +40,7 @@ defmodule Membrane.HLS.CMAFSink do
         {packager, stream_id} =
           Packager.put_stream(packager,
             stream: stream,
-            segment_extension: ".fmp4",
+            segment_extension: ".m4s",
             target_segment_duration: target_duration
           )
 
