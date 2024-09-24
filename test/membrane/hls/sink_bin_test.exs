@@ -31,7 +31,7 @@ defmodule Membrane.HLS.SinkBinTest do
               type: "audio",
               group_id: "audio",
               language: "en",
-              channels: format.codecs.mp4a.channels
+              channels: to_string(format.codecs.mp4a.channels)
             }
           end
         ]
