@@ -4,12 +4,12 @@ defmodule Membrane.HLS.SinkBinTest do
 
   import Membrane.Testing.Assertions
 
-  test "basic pipeline" do
+  @tag :tmp_dir
+  test "on a new stream", %{tmp_dir: tmp_dir} do
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
-        base_manifest_uri: "s3://bucket/stream",
+        base_manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
         segment_duration: Membrane.Time.seconds(4),
-        outputs: :manifests_and_segments,
         storage: Membrane.HLS.Storage.File.new()
       }),
       # Audio
@@ -31,7 +31,7 @@ defmodule Membrane.HLS.SinkBinTest do
         output_stream_structure: :avc1
       })
       |> via_in(Pad.ref(:input, :v),
-        options: [encoding: :H264, track_name: "audio_720x480"]
+        options: [encoding: :H264, track_name: "720x480"]
       )
       |> get_child(:sink)
     ]

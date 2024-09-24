@@ -14,20 +14,24 @@ defmodule Membrane.HLS.Storage.File do
 
   def new(), do: %__MODULE__{}
 
-  def get(_storage, uri) do
-    File.read(to_path(uri))
-  end
+  defimpl Membrane.HLS.Storage do
+    def get(_storage, uri) do
+      File.read(to_path(uri))
+    end
 
-  def list(_storage, uri) do
-    File.ls(to_path(uri))
-  end
+    def list(_storage, uri) do
+      File.ls(to_path(uri))
+    end
 
-  def store(_storage, uri, binary) do
-    File.write(to_path(uri), binary)
-  end
+    def store(_storage, uri, binary) do
+      File.write(to_path(uri), binary)
+    end
 
-  defp to_path(%URI{scheme: "file"} = uri) do
-    Path.join(uri.host, uri.path)
+    defp to_path(%URI{scheme: "file"} = uri) do
+      [uri.host, uri.path]
+      |> Enum.reject(&is_nil/1)
+      |> Path.join()
+    end
   end
 end
 
