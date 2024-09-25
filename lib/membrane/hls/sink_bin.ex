@@ -26,6 +26,13 @@ defmodule Membrane.HLS.SinkBin do
       description: """
       The length of the regular segments.
       """
+    ],
+    safety_delay: [
+      spec: Membrane.Time.t() | nil,
+      default: nil,
+      description: """
+
+      """
     ]
   )
 
