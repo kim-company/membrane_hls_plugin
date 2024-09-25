@@ -49,6 +49,7 @@ defmodule Membrane.HLS.SinkBinTest do
       |> via_in(Pad.ref(:input, "video_460x720"),
         options: [
           encoding: :H264,
+          filler: fn duration -> nil end,
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: uri,
