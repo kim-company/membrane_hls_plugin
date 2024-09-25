@@ -6,6 +6,8 @@ defmodule Membrane.HLS.SinkBin do
   use Membrane.Bin
   alias HLS.Packager
 
+  require Membrane.Logger
+
   def_options(
     manifest_uri: [
       spec: URI.t(),
@@ -27,11 +29,13 @@ defmodule Membrane.HLS.SinkBin do
       Target duration for each HLS segment.
       """
     ],
-    safety_delay: [
-      spec: Membrane.Time.t() | nil,
-      default: nil,
+    mode: [
+      spec: {:live, Membrane.Time.t()} | :vod,
+      default: :vod,
       description: """
-
+      * {:live, safety_delay} -> This element will include the provided segments
+      in the media playlist each target_segment_duration.
+      * :vod -> At the end of the segment production, playlists are written down.
       """
     ]
   )
@@ -57,7 +61,7 @@ defmodule Membrane.HLS.SinkBin do
 
   @impl true
   def handle_init(_context, opts) do
-    {[], %{opts: opts, packager_pid: nil, ended_sinks: MapSet.new()}}
+    {[], %{opts: opts, packager_pid: nil, ended_sinks: MapSet.new(), live_state: nil}}
   end
 
   @impl true
@@ -72,6 +76,21 @@ defmodule Membrane.HLS.SinkBin do
       end)
 
     {[], %{state | packager_pid: packager_pid}}
+  end
+
+  @impl true
+  def handle_element_start_of_stream(
+        child = {:muxer, _},
+        _pad,
+        _ctx,
+        state = %{live_state: nil, opts: %{mode: {:live, _}}}
+      ) do
+    Membrane.Logger.debug("Initializing live state: triggering child: #{inspect(child)}")
+    {[], live_init_state(state)}
+  end
+
+  def handle_element_start_of_stream(_child, _pad, _ctx, state) do
+    {[], state}
   end
 
   @impl true
@@ -110,9 +129,14 @@ defmodule Membrane.HLS.SinkBin do
     ended_sinks = MapSet.put(state.ended_sinks, sink)
 
     if MapSet.equal?(all_sinks, ended_sinks) do
-      # TODO: Flush should be based on a notification instead.
       Agent.update(state.packager_pid, &Packager.flush(&1))
-      {[notify_parent: :end_of_stream], %{state | ended_sinks: ended_sinks}}
+
+      state =
+        state
+        |> put_in([:live_state], %{stop: true})
+        |> put_in([:ended_sinks], ended_sinks)
+
+      {[notify_parent: :end_of_stream], state}
     else
       {[], %{state | ended_sinks: ended_sinks}}
     end
@@ -120,5 +144,61 @@ defmodule Membrane.HLS.SinkBin do
 
   def handle_element_end_of_stream(_element, _pad, _ctx, state) do
     {[], state}
+  end
+
+  @impl true
+  def handle_info(:sync, _ctx, state) do
+    Membrane.Logger.debug("Packager: syncing playlists")
+
+    Agent.update(state.packager_pid, fn p ->
+      Packager.sync(p, state.live_state.next_sync_point)
+    end)
+
+    {[], live_schedule_next_sync(state)}
+  end
+
+  defp live_schedule_next_sync(state = %{live_state: %{stop: true}}) do
+    {[], state}
+  end
+
+  defp live_schedule_next_sync(state) do
+    state =
+      state
+      |> update_in([:live_state, :next_sync_point], fn x ->
+        x + state.opts.target_segment_duration
+      end)
+      |> update_in([:live_state, :next_deadline], fn x ->
+        x + Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
+      end)
+
+    Process.send_after(self(), :sync, state.live_state.next_deadline, abs: true)
+    state
+  end
+
+  defp live_init_state(state) do
+    # Tells where in the playlist we should start issuing segments.
+    next_sync_point =
+      Agent.get(
+        state.packager_pid,
+        &Packager.next_sync_point(&1, state.opts.target_segment_duration)
+      )
+
+    {:live, safety_delay} = state.opts.mode
+    now = :erlang.monotonic_time(:millisecond)
+
+    # Tells when we should do it.
+    deadline =
+      now + Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round) +
+        Membrane.Time.as_milliseconds(safety_delay, :round)
+
+    live_state = %{
+      next_sync_point: next_sync_point,
+      next_deadline: deadline,
+      stop: false
+    }
+
+    Process.send_after(self(), :sync, deadline, abs: true)
+
+    %{state | live_state: live_state}
   end
 end
