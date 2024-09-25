@@ -8,8 +8,8 @@ defmodule Membrane.HLS.SinkBinTest do
   test "on a new stream", %{tmp_dir: tmp_dir} do
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
-        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
-        segment_duration: Membrane.Time.seconds(4),
+        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
+        target_segment_duration: Membrane.Time.seconds(4),
         storage: HLS.Storage.File.new()
       }),
 
@@ -49,7 +49,6 @@ defmodule Membrane.HLS.SinkBinTest do
       |> via_in(Pad.ref(:input, "video_460x720"),
         options: [
           encoding: :H264,
-          filler: fn duration -> nil end,
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: uri,

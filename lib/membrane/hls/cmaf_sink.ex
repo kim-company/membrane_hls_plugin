@@ -10,53 +10,62 @@ defmodule Membrane.HLS.CMAFSink do
   def_options(
     packager_pid: [
       spec: pid(),
-      description: """
-      PID of the packager.
-      """
+      description: "PID of the packager."
+    ],
+    track_id: [
+      spec: String.t(),
+      description: "ID of the track."
     ],
     build_stream: [
-      spec: (Membrane.CMAF.Track.t() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
+      spec:
+        (URI.t(), Membrane.CMAF.Track.t() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
       description: "Build the stream with the given stream format"
     ],
-    segment_duration: [
+    target_segment_duration: [
       spec: Membrane.Time.t()
     ]
   )
 
   @impl true
   def handle_init(_context, opts) do
-    {[], %{opts: opts, stream_id: nil}}
+    {[], %{opts: opts}}
   end
 
   def handle_stream_format(:input, format, _ctx, state) do
-    stream = state.opts.build_stream.(format)
+    track_id = state.opts.track_id
 
-    target_duration =
-      Membrane.Time.as_seconds(state.opts.segment_duration, :exact)
+    target_segment_duration =
+      Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    stream_id =
-      Agent.get_and_update(state.opts.packager_pid, fn packager ->
-        {packager, stream_id} =
-          Packager.put_stream(packager,
-            stream: stream,
+    Agent.update(state.opts.packager_pid, fn packager ->
+      packager =
+        if Packager.has_track?(packager, track_id) do
+          # Packager.discontinue_track(packager, track_id)
+          packager
+        else
+          uri = Packager.new_variant_uri(packager, track_id)
+
+          Packager.add_track(
+            packager,
+            track_id,
+            stream: state.opts.build_stream.(uri, format),
             segment_extension: ".m4s",
-            target_segment_duration: target_duration
+            target_segment_duration: target_segment_duration
           )
+        end
 
-        packager = Packager.put_init_section(packager, stream_id, format.header)
+      Packager.put_init_section(packager, track_id, format.header)
+    end)
 
-        {stream_id, packager}
-      end)
-
-    {[], %{state | stream_id: stream_id}}
+    {[], state}
   end
 
   def handle_buffer(:input, buffer, _ctx, state) do
     Agent.update(state.opts.packager_pid, fn packager ->
       Packager.put_segment(
         packager,
-        state.stream_id,
+        state.opts.track_id,
         buffer.payload,
         Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
       )
