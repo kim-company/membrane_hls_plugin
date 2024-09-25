@@ -21,10 +21,10 @@ defmodule Membrane.HLS.SinkBin do
       Implementation of the storage.
       """
     ],
-    segment_duration: [
+    target_segment_duration: [
       spec: Membrane.Time.t(),
       description: """
-      The length of the regular segments.
+      Target duration for each HLS segment.
       """
     ]
   )
@@ -60,7 +60,7 @@ defmodule Membrane.HLS.SinkBin do
         Packager.new(
           storage: state.opts.storage,
           manifest_uri: state.opts.manifest_uri,
-          resume_finished_streams: true
+          resume_finished_tracks: true
         )
       end)
 
@@ -77,16 +77,15 @@ defmodule Membrane.HLS.SinkBin do
     spec = [
       bin_input(pad)
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-        # TODO
-        segment_min_duration: state.opts.segment_duration - 1
+        # The minimum duration of the CMAF will be one second less than the actual target duration.
+        # This requires that the H264 stream has a keyframe at least every second.
+        segment_min_duration: state.opts.target_segment_duration - Membrane.Time.second()
       })
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
         packager_pid: state.packager_pid,
-        segment_duration: state.opts.segment_duration,
-        build_stream: fn stream_format ->
-          uri = Agent.get(state.packager_pid, &Packager.new_variant_uri(&1, "_#{track_id}"))
-          pad_opts.build_stream.(uri, stream_format)
-        end
+        track_id: track_id,
+        target_segment_duration: state.opts.target_segment_duration,
+        build_stream: pad_opts.build_stream
       })
     ]
 
