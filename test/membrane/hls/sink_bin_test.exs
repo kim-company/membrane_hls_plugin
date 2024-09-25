@@ -8,7 +8,7 @@ defmodule Membrane.HLS.SinkBinTest do
   test "on a new stream", %{tmp_dir: tmp_dir} do
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
-        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
+        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
         segment_duration: Membrane.Time.seconds(4),
         storage: HLS.Storage.File.new()
       }),
@@ -28,7 +28,7 @@ defmodule Membrane.HLS.SinkBinTest do
             %HLS.AlternativeRendition{
               uri: uri,
               name: "Audio (EN)",
-              type: "audio",
+              type: :audio,
               group_id: "audio",
               language: "en",
               channels: to_string(format.codecs.mp4a.channels)

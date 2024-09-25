@@ -29,11 +29,11 @@ defmodule Membrane.HLS.CMAFSink do
   end
 
   def handle_stream_format(:input, format, _ctx, state) do
+    stream = state.opts.build_stream.(format)
+
     target_duration =
       Membrane.Time.as_seconds(state.opts.segment_duration, :exact)
       |> Ratio.ceil()
-
-    stream = state.opts.build_stream.(format)
 
     stream_id =
       Agent.get_and_update(state.opts.packager_pid, fn packager ->

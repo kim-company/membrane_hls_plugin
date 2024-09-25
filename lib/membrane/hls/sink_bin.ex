@@ -77,7 +77,8 @@ defmodule Membrane.HLS.SinkBin do
     spec = [
       bin_input(pad)
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-        segment_min_duration: state.opts.segment_duration
+        # TODO
+        segment_min_duration: state.opts.segment_duration - 1
       })
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
         packager_pid: state.packager_pid,
@@ -103,6 +104,7 @@ defmodule Membrane.HLS.SinkBin do
     ended_sinks = MapSet.put(state.ended_sinks, sink)
 
     if MapSet.equal?(all_sinks, ended_sinks) do
+      # TODO: Flush should be based on a notification instead.
       Agent.update(state.packager_pid, &Packager.flush(&1))
       {[notify_parent: :end_of_stream], %{state | ended_sinks: ended_sinks}}
     else
