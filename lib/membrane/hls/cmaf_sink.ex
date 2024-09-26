@@ -80,7 +80,7 @@ defmodule Membrane.HLS.CMAFSink do
     {[], put_in(state, [:upload_tasks, task.ref], ref)}
   end
 
-  def handle_info({task_ref, :ok}, state) do
+  def handle_info({task_ref, :ok}, _ctx, state) do
     Process.demonitor(task_ref, [:flush])
 
     {job_ref, state} = pop_in(state, [:upload_tasks, task_ref])
@@ -89,6 +89,6 @@ defmodule Membrane.HLS.CMAFSink do
       Packager.ack_segment(packager, state.opts.track_id, job_ref)
     end)
 
-    {:noreply, state}
+    {[], state}
   end
 end
