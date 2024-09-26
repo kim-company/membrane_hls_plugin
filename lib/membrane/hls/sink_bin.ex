@@ -23,6 +23,14 @@ defmodule Membrane.HLS.SinkBin do
       Implementation of the storage.
       """
     ],
+    min_segment_duration: [
+      spec: Membrane.Time.t(),
+      description: """
+      Specificies the minimum duration of a CMAF segment.
+      In order to ensure that all segments are smaller than the `target_segment_duration`,
+      the keyframe interval of the H264 stream must be subtracted.
+      """
+    ],
     target_segment_duration: [
       spec: Membrane.Time.t(),
       description: """
@@ -103,9 +111,7 @@ defmodule Membrane.HLS.SinkBin do
     spec = [
       bin_input(pad)
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-        # The minimum duration of the CMAF will be one second less than the actual target duration.
-        # This requires that the H264 stream has a keyframe at least every second.
-        segment_min_duration: state.opts.target_segment_duration - Membrane.Time.second()
+        segment_min_duration: state.opts.min_segment_duration
       })
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
         packager_pid: state.packager_pid,

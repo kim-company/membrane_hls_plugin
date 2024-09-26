@@ -9,7 +9,8 @@ defmodule Membrane.HLS.SinkBinTest do
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
         manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
-        target_segment_duration: Membrane.Time.seconds(4),
+        min_segment_duration: Membrane.Time.seconds(5),
+        target_segment_duration: Membrane.Time.seconds(10),
         storage: HLS.Storage.File.new()
       }),
 
