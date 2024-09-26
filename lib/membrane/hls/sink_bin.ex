@@ -41,7 +41,7 @@ defmodule Membrane.HLS.SinkBin do
   )
 
   def_input_pad(:input,
-    accepted_format: any_of(Membrane.H264, Membrane.AAC),
+    accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text),
     availability: :on_request,
     options: [
       encoding: [

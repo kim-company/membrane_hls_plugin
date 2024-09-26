@@ -29,7 +29,8 @@ defmodule Membrane.HLS.MixProject do
       {:membrane_aac_plugin, "~> 0.18"},
       {:membrane_h26x_plugin, "~> 0.10"},
       {:kim_q, "~> 1.0"},
-      {:kim_hls, github: "kim-company/kim_hls"}
+      {:kim_hls, github: "kim-company/kim_hls"},
+      {:membrane_text_format, github: "kim-company/membrane_text_format"}
     ]
   end
 

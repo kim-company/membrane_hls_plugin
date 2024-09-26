@@ -28,7 +28,7 @@ defmodule Membrane.HLS.CMAFSink do
 
   @impl true
   def handle_init(_context, opts) do
-    {[], %{opts: opts}}
+    {[], %{opts: opts, upload_tasks: %{}}}
   end
 
   def handle_stream_format(:input, format, _ctx, state) do
@@ -61,15 +61,33 @@ defmodule Membrane.HLS.CMAFSink do
   end
 
   def handle_buffer(:input, buffer, _ctx, state) do
+    {ref, upload_fun} =
+      Agent.get_and_update(state.opts.packager_pid, fn packager ->
+        {packager, {ref, upload_fun}} =
+          Packager.put_segment_async(
+            packager,
+            state.opts.track_id,
+            buffer.payload,
+            Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
+          )
+
+        {{ref, upload_fun}, packager}
+      end)
+
+    task = Task.async(upload_fun)
+
+    {[], put_in(state, [:upload_tasks, task.ref], ref)}
+  end
+
+  def handle_info({task_ref, :ok}, state) do
+    Process.demonitor(task_ref, [:flush])
+
+    {job_ref, state} = pop_in(state, [:upload_tasks, task_ref])
+
     Agent.update(state.opts.packager_pid, fn packager ->
-      Packager.put_segment(
-        packager,
-        state.opts.track_id,
-        buffer.payload,
-        Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
-      )
+      Packager.ack_segment(packager, state.opts.track_id, job_ref)
     end)
 
-    {[], state}
+    {:noreply, state}
   end
 end
