@@ -38,6 +38,34 @@ defmodule Membrane.HLS.SinkBinTest do
       )
       |> get_child(:sink),
 
+      # Subtitles
+      # child(:text_source, %Membrane.Testing.Source{
+      #   stream_format: %Membrane.Text{locale: "de"},
+      #   output: [
+      #     %Membrane.Buffer{
+      #       payload:
+      #         "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua.",
+      #       pts: Membrane.Time.milliseconds(100),
+      #       metadata: %{duration: Membrane.Time.seconds(12)}
+      #     }
+      #   ]
+      # })
+      # |> via_in(Pad.ref(:input, "subtitles"),
+      #   options: [
+      #     encoding: :TEXT,
+      #     build_stream: fn uri, %Membrane.Text{} = format ->
+      #       %HLS.AlternativeRendition{
+      #         uri: uri,
+      #         name: "Subtitles (EN)",
+      #         type: :subtitles,
+      #         group_id: "subtitles",
+      #         language: format.locale
+      #       }
+      #     end
+      #   ]
+      # )
+      # |> get_child(:sink),
+
       # Video
       child(:h264_source, %Membrane.File.Source{
         location: "test/fixtures/samples_big-buck-bunny_bun33s_720x480.h264"
@@ -56,7 +84,8 @@ defmodule Membrane.HLS.SinkBinTest do
               resolution: format.resolution,
               frame_rate: 30.0,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
-              audio: "audio"
+              audio: "audio",
+              subtitles: "subtitles"
             }
           end
         ]
