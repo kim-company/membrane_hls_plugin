@@ -147,6 +147,10 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   @impl true
+  def handle_info(:sync, _ctx, state = %{live_state: %{stop: true}}) do
+    {[], state}
+  end
+
   def handle_info(:sync, _ctx, state) do
     Membrane.Logger.debug("Packager: syncing playlists")
 
@@ -155,10 +159,6 @@ defmodule Membrane.HLS.SinkBin do
     end)
 
     {[], live_schedule_next_sync(state)}
-  end
-
-  defp live_schedule_next_sync(state = %{live_state: %{stop: true}}) do
-    {[], state}
   end
 
   defp live_schedule_next_sync(state) do
