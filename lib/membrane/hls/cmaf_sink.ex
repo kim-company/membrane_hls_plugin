@@ -62,7 +62,7 @@ defmodule Membrane.HLS.CMAFSink do
   end
 
   def handle_buffer(:input, buffer, _ctx, state) do
-    {ref, upload_fun} =
+    {job_ref, upload_fun} =
       Agent.get_and_update(state.opts.packager_pid, fn packager ->
         {packager, {ref, upload_fun}} =
           Packager.put_segment_async(
@@ -77,18 +77,33 @@ defmodule Membrane.HLS.CMAFSink do
 
     task = Task.async(upload_fun)
 
-    {[], put_in(state, [:upload_tasks, task.ref], ref)}
+    {[], put_in(state, [:upload_tasks, task.ref], %{job_ref: job_ref, task: task})}
   end
 
   def handle_info({task_ref, :ok}, _ctx, state) do
     Process.demonitor(task_ref, [:flush])
 
-    {job_ref, state} = pop_in(state, [:upload_tasks, task_ref])
+    {data, state} = pop_in(state, [:upload_tasks, task_ref])
 
     Agent.update(state.opts.packager_pid, fn packager ->
-      Packager.ack_segment(packager, state.opts.track_id, job_ref)
+      Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
     end)
 
     {[], state}
+  end
+
+  def handle_end_of_stream(:input, _ctx, state) do
+    state.upload_tasks
+    |> Map.values()
+    |> Enum.map(& &1.task)
+    |> Task.await_many(:infinity)
+
+    Agent.update(state.opts.packager_pid, fn packager ->
+      Enum.reduce(state.upload_tasks, packager, fn {_task_ref, data}, packager ->
+        Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
+      end)
+    end)
+
+    {[], %{state | upload_tasks: %{}}}
   end
 end
