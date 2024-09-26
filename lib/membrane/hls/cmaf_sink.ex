@@ -92,6 +92,11 @@ defmodule Membrane.HLS.CMAFSink do
     {[], state}
   end
 
+  def handle_info({:DOWN, _ref, _, _, reason}, _ctx, state) do
+    raise "Cannot write segment of track #{state.track_id} with reason: #{inspect(reason)}."
+    {[], state}
+  end
+
   def handle_end_of_stream(:input, _ctx, state) do
     state.upload_tasks
     |> Map.values()
