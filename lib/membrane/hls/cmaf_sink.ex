@@ -48,6 +48,7 @@ defmodule Membrane.HLS.CMAFSink do
           Packager.add_track(
             packager,
             track_id,
+            codecs: Membrane.HLS.serialize_codecs(format.codecs),
             stream: state.opts.build_stream.(uri, format),
             segment_extension: ".m4s",
             target_segment_duration: target_segment_duration
