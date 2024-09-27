@@ -3,11 +3,9 @@ Mix.install([
   :membrane_rtmp_plugin,
   :membrane_aac_plugin,
   :membrane_h26x_plugin,
-  :membrane_ffmpeg_transcoder_plugin,
   :membrane_tee_plugin,
-  :membrane_ffmpeg_swresample_plugin,
-  :membrane_aac_fdk_plugin, 
-  {:membrane_hls_plugin, path: "../"}
+  :membrane_ffmpeg_transcoder_plugin,
+  {:membrane_hls_plugin, path: Path.expand(Path.join(__DIR__, "../"))}
 ])
 
 defmodule Pipeline do
@@ -104,8 +102,8 @@ defmodule Pipeline do
         resolution: {-2, 360},
         bitrate: 1020800,
         profile: :main,
-        fps: 30,
-        gop_size: 60,
+        fps: 15,
+        gop_size: 30,
         b_frames: 3,
         crf: 23,
         preset: :veryfast,
@@ -124,7 +122,7 @@ defmodule Pipeline do
               bandwidth: 1_200_000,
               resolution: format.resolution,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
-              audio: "AUDIO"
+              audio: "program_audio"
             }
           end
         ]
