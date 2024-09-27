@@ -108,8 +108,12 @@ defmodule Membrane.HLS.SinkBin do
         state
       )
       when encoding in [:H264, :AAC] do
-    spec = [
+    {shift_duration, _fill_from} = resume_info(state.packager_pid, track_id)
+
+    spec =
       bin_input(pad)
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: shift_duration})
+      # |> child({:filler, track_id}, %Membrane.HLS.Filler{start_pts: fill_start_pts})
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: state.opts.min_segment_duration
       })
@@ -119,7 +123,6 @@ defmodule Membrane.HLS.SinkBin do
         target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
       })
-    ]
 
     {[spec: spec], state}
   end
@@ -129,38 +132,12 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :TEXT} = pad_opts},
         state
       ) do
-    {start_pts, fill_duration} =
-      Agent.get(state.packager_pid, fn packager ->
-        start_pts =
-          Packager.max_track_duration(packager)
-          |> Ratio.new()
-          |> Membrane.Time.seconds()
-
-        fill_duration =
-          if Packager.has_track?(packager, track_id) do
-            track_duration =
-              Packager.track_duration(packager, track_id)
-              |> Ratio.new()
-              |> Membrane.Time.seconds()
-
-            start_pts - track_duration
-          else
-            0
-          end
-
-        {start_pts, fill_duration}
-      end)
+    {shift_duration, fill_from} = resume_info(state.packager_pid, track_id)
 
     spec =
-      if fill_duration > 0 do
-        bin_input(pad)
-        |> child({:filler, track_id}, %Membrane.HLS.TextFiller{
-          start_pts: start_pts,
-          fill_duration: fill_duration
-        })
-      else
-        bin_input(pad)
-      end
+      bin_input(pad)
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: shift_duration})
+      |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: fill_from})
       |> child({:cues, track_id}, Membrane.WebVTT.CueBuilderFilter)
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: state.opts.target_segment_duration,
@@ -180,6 +157,26 @@ defmodule Membrane.HLS.SinkBin do
       })
 
     {[spec: spec], state}
+  end
+
+  def resume_info(packager_pid, track_id) do
+    Agent.get(packager_pid, fn packager ->
+      shift_duration =
+        Packager.max_track_duration(packager)
+        |> Ratio.new()
+        |> Membrane.Time.seconds()
+
+      fill_from =
+        if Packager.has_track?(packager, track_id) do
+          Packager.track_duration(packager, track_id)
+          |> Ratio.new()
+          |> Membrane.Time.seconds()
+        else
+          0
+        end
+
+      {shift_duration, fill_from}
+    end)
   end
 
   @impl true
