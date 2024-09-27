@@ -63,9 +63,13 @@ defmodule Membrane.HLS.Shifter do
     shifted_buffer = %{
       buffer
       | pts: buffer.pts + state.duration,
-        dts: Membrane.Buffer.get_dts_or_pts(buffer) + state.duration
+        dts: Membrane.Buffer.get_dts_or_pts(buffer) + state.duration,
+        metadata: update_metadata(buffer.metadata, state.duration)
     }
 
     {[buffer: {:output, shifted_buffer}], state}
   end
+
+  def update_metadata(%{to: to} = metadata, duration), do: %{metadata | to: to + duration}
+  def update_metadata(metadata, _duration), do: metadata
 end
