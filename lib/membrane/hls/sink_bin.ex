@@ -124,6 +124,28 @@ defmodule Membrane.HLS.SinkBin do
     {[spec: spec], state}
   end
 
+  def handle_pad_added(
+        Pad.ref(:input, track_id) = pad,
+        %{pad_options: %{encoding: :TEXT} = pad_opts},
+        state
+      ) do
+    spec = [
+      bin_input(pad)
+      |> child(:cues, Membrane.WebVTT.CueBuilderFilter)
+      |> child(:webvtt, %Membrane.WebVTT.SegmentFilter{
+        segment_duration: state.opts.min_segment_duration
+      })
+      |> child({:sink, track_id}, %Membrane.HLS.WebVTTSink{
+        packager_pid: state.packager_pid,
+        track_id: track_id,
+        target_segment_duration: state.opts.min_segment_duration,
+        build_stream: pad_opts.build_stream
+      })
+    ]
+
+    {[spec: spec], state}
+  end
+
   @impl true
   def handle_element_end_of_stream({:sink, _track_id} = sink, _pad, ctx, state) do
     all_sinks =

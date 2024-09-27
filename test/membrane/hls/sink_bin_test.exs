@@ -40,32 +40,46 @@ defmodule Membrane.HLS.SinkBinTest do
       |> get_child(:sink),
 
       # Subtitles
-      # child(:text_source, %Membrane.Testing.Source{
-      #   stream_format: %Membrane.Text{locale: "de"},
-      #   output: [
-      #     %Membrane.Buffer{
-      #       payload:
-      #         "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua.",
-      #       pts: Membrane.Time.milliseconds(100),
-      #       metadata: %{duration: Membrane.Time.seconds(12)}
-      #     }
-      #   ]
-      # })
-      # |> via_in(Pad.ref(:input, "subtitles"),
-      #   options: [
-      #     encoding: :TEXT,
-      #     build_stream: fn uri, %Membrane.Text{} = format ->
-      #       %HLS.AlternativeRendition{
-      #         uri: uri,
-      #         name: "Subtitles (EN)",
-      #         type: :subtitles,
-      #         group_id: "subtitles",
-      #         language: format.locale
-      #       }
-      #     end
-      #   ]
-      # )
-      # |> get_child(:sink),
+      child(:text_source, %Membrane.Testing.Source{
+        stream_format: %Membrane.Text{locale: "de"},
+        output: [
+          %Membrane.Buffer{
+            payload: "Subtitle from start to 5s",
+            pts: Membrane.Time.milliseconds(100),
+            metadata: %{to: Membrane.Time.seconds(5)}
+          },
+          %Membrane.Buffer{
+            payload: "",
+            pts: Membrane.Time.seconds(5),
+            metadata: %{to: Membrane.Time.seconds(8)}
+          },
+          %Membrane.Buffer{
+            payload: "Subtitle from 11s to 15s",
+            pts: Membrane.Time.seconds(11),
+            metadata: %{to: Membrane.Time.seconds(15)}
+          },
+          %Membrane.Buffer{
+            payload: "",
+            pts: Membrane.Time.seconds(15),
+            metadata: %{to: Membrane.Time.seconds(32)}
+          }
+        ]
+      })
+      |> via_in(Pad.ref(:input, "subtitles"),
+        options: [
+          encoding: :TEXT,
+          build_stream: fn uri, %Membrane.Text{} = format ->
+            %HLS.AlternativeRendition{
+              uri: uri,
+              name: "Subtitles (EN)",
+              type: :subtitles,
+              group_id: "subtitles",
+              language: format.locale
+            }
+          end
+        ]
+      )
+      |> get_child(:sink),
 
       # Video
       child(:h264_source, %Membrane.File.Source{
