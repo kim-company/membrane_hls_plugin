@@ -129,19 +129,55 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :TEXT} = pad_opts},
         state
       ) do
-    spec = [
-      bin_input(pad)
-      |> child(:cues, Membrane.WebVTT.CueBuilderFilter)
-      |> child(:webvtt, %Membrane.WebVTT.SegmentFilter{
-        segment_duration: state.opts.min_segment_duration
+    {start_pts, fill_duration} =
+      Agent.get(state.packager_pid, fn packager ->
+        start_pts =
+          Packager.max_track_duration(packager)
+          |> Ratio.new()
+          |> Membrane.Time.seconds()
+
+        fill_duration =
+          if Packager.has_track?(packager, track_id) do
+            track_duration =
+              Packager.track_duration(packager, track_id)
+              |> Ratio.new()
+              |> Membrane.Time.seconds()
+
+            start_pts - track_duration
+          else
+            0
+          end
+
+        {start_pts, fill_duration}
+      end)
+
+    spec =
+      if fill_duration > 0 do
+        bin_input(pad)
+        |> child({:filler, track_id}, %Membrane.HLS.TextFiller{
+          start_pts: start_pts,
+          fill_duration: fill_duration
+        })
+      else
+        bin_input(pad)
+      end
+      |> child({:cues, track_id}, Membrane.WebVTT.CueBuilderFilter)
+      |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
+        segment_duration: state.opts.target_segment_duration,
+        headers: [
+          %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"},
+          %Subtitle.WebVTT.HeaderLine{
+            key: :x_timestamp_map,
+            original: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:90000"
+          }
+        ]
       })
       |> child({:sink, track_id}, %Membrane.HLS.WebVTTSink{
         packager_pid: state.packager_pid,
         track_id: track_id,
-        target_segment_duration: state.opts.min_segment_duration,
+        target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
       })
-    ]
 
     {[spec: spec], state}
   end

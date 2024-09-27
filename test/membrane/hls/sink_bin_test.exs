@@ -32,7 +32,9 @@ defmodule Membrane.HLS.SinkBinTest do
               type: :audio,
               group_id: "audio",
               language: "en",
-              channels: to_string(format.codecs.mp4a.channels)
+              channels: to_string(format.codecs.mp4a.channels),
+              default: true,
+              autoselect: true
             }
           end
         ]
@@ -44,23 +46,28 @@ defmodule Membrane.HLS.SinkBinTest do
         stream_format: %Membrane.Text{locale: "de"},
         output: [
           %Membrane.Buffer{
+            payload: "",
+            pts: 0,
+            metadata: %{to: Membrane.Time.milliseconds(99)}
+          },
+          %Membrane.Buffer{
             payload: "Subtitle from start to 5s",
             pts: Membrane.Time.milliseconds(100),
             metadata: %{to: Membrane.Time.seconds(5)}
           },
           %Membrane.Buffer{
             payload: "",
-            pts: Membrane.Time.seconds(5),
-            metadata: %{to: Membrane.Time.seconds(8)}
+            pts: Membrane.Time.seconds(5) + Membrane.Time.millisecond(),
+            metadata: %{to: Membrane.Time.seconds(11)}
           },
           %Membrane.Buffer{
             payload: "Subtitle from 11s to 15s",
-            pts: Membrane.Time.seconds(11),
+            pts: Membrane.Time.seconds(11) + Membrane.Time.millisecond(),
             metadata: %{to: Membrane.Time.seconds(15)}
           },
           %Membrane.Buffer{
             payload: "",
-            pts: Membrane.Time.seconds(15),
+            pts: Membrane.Time.seconds(15) + Membrane.Time.millisecond(),
             metadata: %{to: Membrane.Time.seconds(32)}
           }
         ]
@@ -74,7 +81,9 @@ defmodule Membrane.HLS.SinkBinTest do
               name: "Subtitles (EN)",
               type: :subtitles,
               group_id: "subtitles",
-              language: format.locale
+              language: format.locale,
+              default: true,
+              autoselect: true
             }
           end
         ]
@@ -95,9 +104,9 @@ defmodule Membrane.HLS.SinkBinTest do
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: uri,
-              bandwidth: 10_000,
+              bandwidth: 850_000,
               resolution: format.resolution,
-              frame_rate: 30.0,
+              frame_rate: 25.0,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
               audio: "audio",
               subtitles: "subtitles"

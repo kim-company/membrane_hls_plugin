@@ -40,8 +40,7 @@ defmodule Membrane.HLS.WebVTTSink do
 
     Agent.update(state.opts.packager_pid, fn packager ->
       if Packager.has_track?(packager, track_id) do
-        # Packager.discontinue_track(packager, track_id)
-        packager
+        Packager.discontinue_track(packager, track_id)
       else
         uri = Packager.new_variant_uri(packager, track_id)
 
