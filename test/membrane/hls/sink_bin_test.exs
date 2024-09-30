@@ -8,7 +8,7 @@ defmodule Membrane.HLS.SinkBinTest do
   test "on a new stream", %{tmp_dir: tmp_dir} do
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
-        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
+        manifest_uri: URI.new!("file://output/stream.m3u8"),
         min_segment_duration: Membrane.Time.seconds(5),
         target_segment_duration: Membrane.Time.seconds(10),
         storage: HLS.Storage.File.new()
@@ -19,8 +19,8 @@ defmodule Membrane.HLS.SinkBinTest do
         location: "test/fixtures/samples_big-buck-bunny_bun33s.aac"
       })
       |> child(:aac_parser, %Membrane.AAC.Parser{
-        out_encapsulation: :none,
-        output_config: :esds
+        out_encapsulation: :ADTS
+        # output_config: :esds
       })
       |> via_in(Pad.ref(:input, "audio_128k"),
         options: [
