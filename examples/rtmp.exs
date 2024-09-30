@@ -16,17 +16,17 @@ defmodule Pipeline do
     File.rm_rf("tmp")
 
     structure = [
+      # Source
+      child(:source, %Membrane.RTMP.SourceBin{
+        url: "rtmp://127.0.0.1:1935/app/stream_key"
+      }),
+
       # Sink
       child(:sink, %Membrane.HLS.SinkBin{
         manifest_uri: URI.new!("file://tmp/stream.m3u8"),
         min_segment_duration: Membrane.Time.seconds(5),
         target_segment_duration: Membrane.Time.seconds(10),
         storage: HLS.Storage.File.new()
-      }),
-
-      # Source
-      child(:source, %Membrane.RTMP.SourceBin{
-        url: "rtmp://127.0.0.1:1935/app/stream_key"
       }),
 
       # Audio

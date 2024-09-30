@@ -108,22 +108,22 @@ defmodule Membrane.HLS.SinkBin do
         state
       )
       when encoding in [:H264, :AAC] do
-    {max_pts, track_pts} = resume_info(state.packager_pid, track_id)
+    {max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
       |> then(fn spec ->
-        if encoding == :AAC do
-          spec
-          |> child({:filler, track_id}, %Membrane.HLS.AACFiller{duration: max_pts - track_pts})
-          |> child(:fix_parser, %Membrane.AAC.Parser{
-            out_encapsulation: :none,
-            output_config: :esds
-          })
-          |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
-        else
-          child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
-        end
+        # if encoding == :AAC do
+        #   spec
+        #   |> child({:filler, track_id}, %Membrane.HLS.AACFiller{duration: max_pts - track_pts})
+        #   |> child(:fix_parser, %Membrane.AAC.Parser{
+        #     out_encapsulation: :none,
+        #     output_config: :esds
+        #   })
+        #   |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
+        # else
+        child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+        # end
       end)
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: state.opts.min_segment_duration
