@@ -243,7 +243,7 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   def handle_info(:sync, _ctx, state) do
-    Membrane.Logger.debug("Packager: syncing playlists")
+    Membrane.Logger.debug("Packager: syncing playlists up to #{state.live_state.next_sync_point}")
 
     Agent.update(state.packager_pid, fn p ->
       Packager.sync(p, state.live_state.next_sync_point)
