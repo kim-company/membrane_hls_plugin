@@ -243,7 +243,9 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   def handle_info(:sync, _ctx, state) do
-    Membrane.Logger.debug("Packager: syncing playlists up to #{state.live_state.next_sync_point}")
+    Membrane.Logger.debug(
+      "Packager: syncing playlists up to #{state.live_state.next_sync_point}s"
+    )
 
     Agent.update(state.packager_pid, fn p ->
       Packager.sync(p, state.live_state.next_sync_point)
@@ -299,7 +301,7 @@ defmodule Membrane.HLS.SinkBin do
     state =
       state
       |> update_in([:live_state, :next_sync_point], fn x ->
-        x + state.opts.target_segment_duration
+        x + Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
       end)
       |> update_in([:live_state, :next_deadline], fn x ->
         x + Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
@@ -314,7 +316,10 @@ defmodule Membrane.HLS.SinkBin do
     next_sync_point =
       Agent.get(
         state.packager_pid,
-        &Packager.next_sync_point(&1, state.opts.target_segment_duration)
+        &Packager.next_sync_point(
+          &1,
+          Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
+        )
       )
 
     {:live, safety_delay} = state.opts.mode
