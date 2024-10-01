@@ -17,66 +17,32 @@ defmodule Pipeline do
 
     structure = [
       # Source
-      child(:source, %Membrane.RTMP.SourceBin{
-        url: "rtmp://127.0.0.1:1935/app/stream_key"
-      }),
-
+      child(:source, %Membrane.RTMP.Source{
+        url: "rtmp://0.0.0.0:1935/app/stream_key"
+      })
+      |> child(:transcoder, Membrane.FFmpeg.Transcoder),
+      
       # Sink
       child(:sink, %Membrane.HLS.SinkBin{
         manifest_uri: URI.new!("file://tmp/stream.m3u8"),
-        min_segment_duration: Membrane.Time.seconds(5),
-        target_segment_duration: Membrane.Time.seconds(10),
+        target_segment_duration: Membrane.Time.seconds(7),
         storage: HLS.Storage.File.new()
       }),
 
-      # Audio
-      get_child(:source)
-      |> via_out(:audio)
-      |> child(:aac_parser_post, %Membrane.AAC.Parser{
-        out_encapsulation: :none,
-        output_config: :esds
-      })
-      |> via_in(Pad.ref(:input, "audio_128k"),
-        options: [
-          encoding: :AAC,
-          build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
-            %HLS.AlternativeRendition{
-              uri: uri,
-              name: "Audio (EN)",
-              type: :audio,
-              group_id: "program_audio",
-              language: "en",
-              channels: to_string(format.codecs.mp4a.channels),
-              autoselect: true,
-              default: true
-            }
-          end
-        ]
-      )
-      |> get_child(:sink),
-
-      # Video
-      get_child(:source)
-      |> via_out(:video)
-      |> child({:parser, :pre}, %Membrane.H264.Parser{
-        output_stream_structure: :annexb
-      })
-      |> child(:transcoder, Membrane.FFmpeg.Transcoder),
-
       # Video HD
       get_child(:transcoder)
-      |> via_out(:output, options: [
+      |> via_out(:video, options: [
         resolution: {-2, 720},
         bitrate: 3_300_000,
         profile: :high,
         fps: 30,
         gop_size: 60,
         b_frames: 3,
-        crf: 23,
+        crf: 26,
         preset: :veryfast,
         tune: :zerolatency
       ])
-      |> child({:parser, :post, :hd}, %Membrane.H264.Parser{
+      |> child({:parser, :hd}, %Membrane.H264.Parser{
         output_stream_structure: :avc1,
         output_alignment: :au
       })
@@ -98,18 +64,18 @@ defmodule Pipeline do
 
       # Video SD
       get_child(:transcoder)
-      |> via_out(:output, options: [
+      |> via_out(:video, options: [
         resolution: {-2, 360},
         bitrate: 1020800,
         profile: :main,
         fps: 15,
         gop_size: 30,
         b_frames: 3,
-        crf: 23,
+        crf: 26,
         preset: :veryfast,
         tune: :zerolatency
       ])
-      |> child({:parser, :post, :sd}, %Membrane.H264.Parser{
+      |> child({:parser, :sd}, %Membrane.H264.Parser{
         output_stream_structure: :avc1,
         output_alignment: :au
       })
@@ -123,6 +89,32 @@ defmodule Pipeline do
               resolution: format.resolution,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
               audio: "program_audio"
+            }
+          end
+        ]
+      )
+      |> get_child(:sink),
+
+      # Audio
+      get_child(:transcoder)
+      |> via_out(:audio, options: [bitrate: 128_000])
+      |> child(:audio_parser, %Membrane.AAC.Parser{
+        out_encapsulation: :none,
+        output_config: :esds
+      })
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
+            %HLS.AlternativeRendition{
+              uri: uri,
+              name: "Audio (EN)",
+              type: :audio,
+              group_id: "program_audio",
+              language: "en",
+              channels: to_string(format.codecs.mp4a.channels),
+              autoselect: true,
+              default: true
             }
           end
         ]

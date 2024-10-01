@@ -9,8 +9,7 @@ defmodule Membrane.HLS.SinkBinTest do
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
         manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
-        min_segment_duration: Membrane.Time.seconds(5),
-        target_segment_duration: Membrane.Time.seconds(10),
+        target_segment_duration: Membrane.Time.seconds(7),
         storage: HLS.Storage.File.new()
       }),
 
@@ -107,7 +106,7 @@ defmodule Membrane.HLS.SinkBinTest do
               bandwidth: 850_000,
               resolution: format.resolution,
               frame_rate: 25.0,
-              codecs: Membrane.HLS.serialize_codecs(format.codecs),
+              codecs: [],
               audio: "audio",
               subtitles: "subtitles"
             }

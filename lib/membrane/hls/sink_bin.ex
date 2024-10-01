@@ -23,14 +23,6 @@ defmodule Membrane.HLS.SinkBin do
       Implementation of the storage.
       """
     ],
-    min_segment_duration: [
-      spec: Membrane.Time.t(),
-      description: """
-      Specificies the minimum duration of a CMAF segment.
-      In order to ensure that all segments are smaller than the `target_segment_duration`,
-      the keyframe interval of the H264 stream must be subtracted.
-      """
-    ],
     target_segment_duration: [
       spec: Membrane.Time.t(),
       description: """
@@ -102,32 +94,66 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   @impl true
+  def handle_pad_added(_pad, ctx, _state) when ctx.playback == :playing,
+    do:
+      raise(
+        "New pads can be added to #{inspect(__MODULE__)} only before playback transition to :playing"
+      )
+
+  @impl true
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
-        %{pad_options: %{encoding: encoding} = pad_opts},
+        %{pad_options: %{encoding: :AAC} = pad_opts},
         state
-      )
-      when encoding in [:H264, :AAC] do
-    {max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
+      ) do
+    {_max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      |> then(fn spec ->
-        # if encoding == :AAC do
-        #   spec
-        #   |> child({:filler, track_id}, %Membrane.HLS.AACFiller{duration: max_pts - track_pts})
-        #   |> child(:fix_parser, %Membrane.AAC.Parser{
-        #     out_encapsulation: :none,
-        #     output_config: :esds
-        #   })
-        #   |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
-        # else
-        child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
-        # end
-      end)
-      |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-        segment_min_duration: state.opts.min_segment_duration
+      # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> via_in(Pad.ref(:input, track_id))
+      |> audio_muxer(state)
+      |> via_out(Pad.ref(:output), options: [tracks: [track_id]])
+      |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
+        packager_pid: state.packager_pid,
+        track_id: track_id,
+        target_segment_duration: state.opts.target_segment_duration,
+        build_stream: pad_opts.build_stream
       })
+
+    {[spec: spec], state}
+  end
+
+  @impl true
+  def handle_pad_added(
+        Pad.ref(:input, track_id) = pad,
+        %{pad_options: %{encoding: :H264} = pad_opts} = ctx,
+        state
+      ) do
+    {_max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
+
+    had_video_input? =
+      Enum.any?(ctx.pads, fn {Pad.ref(:input, id), data} ->
+        id != track_id and data.options.encoding == :H264
+      end)
+
+    muxer = fn spec ->
+      if had_video_input? do
+        child(spec, {:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
+          segment_min_duration: segment_duration(state)
+        })
+      else
+        spec
+        |> via_in(Pad.ref(:input, track_id))
+        |> audio_muxer(state)
+        |> via_out(Pad.ref(:output), options: [tracks: [track_id]])
+      end
+    end
+
+    spec =
+      bin_input(pad)
+      # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> muxer.()
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
         packager_pid: state.packager_pid,
         track_id: track_id,
@@ -143,15 +169,15 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :TEXT} = pad_opts},
         state
       ) do
-    {max_pts, track_pts} = resume_info(state.packager_pid, track_id)
+    {_max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
-      |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
+      # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      # |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
       |> child({:cues, track_id}, Membrane.WebVTT.CueBuilderFilter)
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
-        segment_duration: state.opts.target_segment_duration,
+        segment_duration: segment_duration(state),
         headers: [
           %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"},
           %Subtitle.WebVTT.HeaderLine{
@@ -168,26 +194,6 @@ defmodule Membrane.HLS.SinkBin do
       })
 
     {[spec: spec], state}
-  end
-
-  def resume_info(packager_pid, track_id) do
-    Agent.get(packager_pid, fn packager ->
-      max_pts =
-        Packager.max_track_duration(packager)
-        |> Ratio.new()
-        |> Membrane.Time.seconds()
-
-      track_pts =
-        if Packager.has_track?(packager, track_id) do
-          Packager.track_duration(packager, track_id)
-          |> Ratio.new()
-          |> Membrane.Time.seconds()
-        else
-          0
-        end
-
-      {max_pts, track_pts}
-    end)
   end
 
   @impl true
@@ -231,6 +237,41 @@ defmodule Membrane.HLS.SinkBin do
     end)
 
     {[], live_schedule_next_sync(state)}
+  end
+
+  defp audio_muxer(spec, state) do
+    child(
+      spec,
+      {:muxer, :audio},
+      %Membrane.MP4.Muxer.CMAF{
+        segment_min_duration: segment_duration(state) - Membrane.Time.millisecond()
+      },
+      get_if_exists: true
+    )
+  end
+
+  defp segment_duration(state) do
+    state.opts.target_segment_duration - Membrane.Time.second()
+  end
+
+  defp resume_info(packager_pid, track_id) do
+    Agent.get(packager_pid, fn packager ->
+      max_pts =
+        Packager.max_track_duration(packager)
+        |> Ratio.new()
+        |> Membrane.Time.seconds()
+
+      track_pts =
+        if Packager.has_track?(packager, track_id) do
+          Packager.track_duration(packager, track_id)
+          |> Ratio.new()
+          |> Membrane.Time.seconds()
+        else
+          0
+        end
+
+      {max_pts, track_pts}
+    end)
   end
 
   defp live_schedule_next_sync(state) do
