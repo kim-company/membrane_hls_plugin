@@ -24,3 +24,6 @@ membrane_hls_plugin-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+/output
+validation_data.json
