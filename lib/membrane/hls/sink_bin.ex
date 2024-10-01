@@ -140,7 +140,7 @@ defmodule Membrane.HLS.SinkBin do
     muxer = fn spec ->
       if had_video_input? do
         child(spec, {:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-          segment_min_duration: segment_duration(state)
+          segment_min_duration: segment_min_duration(state)
         })
       else
         spec
@@ -177,7 +177,7 @@ defmodule Membrane.HLS.SinkBin do
       # |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
       |> child({:cues, track_id}, Membrane.WebVTT.CueBuilderFilter)
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
-        segment_duration: segment_duration(state),
+        segment_duration: state.opts.target_segment_duration - Membrane.Time.second(),
         headers: [
           %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"},
           %Subtitle.WebVTT.HeaderLine{
@@ -244,14 +244,14 @@ defmodule Membrane.HLS.SinkBin do
       spec,
       {:muxer, :audio},
       %Membrane.MP4.Muxer.CMAF{
-        segment_min_duration: segment_duration(state) - Membrane.Time.millisecond()
+        segment_min_duration: segment_min_duration(state)
       },
       get_if_exists: true
     )
   end
 
-  defp segment_duration(state) do
-    state.opts.target_segment_duration - Membrane.Time.second()
+  defp segment_min_duration(state) do
+    state.opts.target_segment_duration - Membrane.Time.seconds(2)
   end
 
   defp resume_info(packager_pid, track_id) do

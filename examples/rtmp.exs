@@ -4,7 +4,7 @@ Mix.install([
   :membrane_aac_plugin,
   :membrane_h26x_plugin,
   :membrane_tee_plugin,
-  :membrane_ffmpeg_transcoder_plugin,
+  {:membrane_ffmpeg_transcoder_plugin, "~> 1.1"},
   {:membrane_hls_plugin, path: Path.expand(Path.join(__DIR__, "../"))}
 ])
 
@@ -28,6 +28,32 @@ defmodule Pipeline do
         target_segment_duration: Membrane.Time.seconds(7),
         storage: HLS.Storage.File.new()
       }),
+
+      # Audio
+      get_child(:transcoder)
+      |> via_out(:audio, options: [bitrate: 128_000])
+      |> child(:audio_parser, %Membrane.AAC.Parser{
+        out_encapsulation: :none,
+        output_config: :esds
+      })
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
+            %HLS.AlternativeRendition{
+              uri: uri,
+              name: "Audio (EN)",
+              type: :audio,
+              group_id: "program_audio",
+              language: "en",
+              channels: to_string(format.codecs.mp4a.channels),
+              autoselect: true,
+              default: true
+            }
+          end
+        ]
+      )
+      |> get_child(:sink),
 
       # Video HD
       get_child(:transcoder)
@@ -89,32 +115,6 @@ defmodule Pipeline do
               resolution: format.resolution,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
               audio: "program_audio"
-            }
-          end
-        ]
-      )
-      |> get_child(:sink),
-
-      # Audio
-      get_child(:transcoder)
-      |> via_out(:audio, options: [bitrate: 128_000])
-      |> child(:audio_parser, %Membrane.AAC.Parser{
-        out_encapsulation: :none,
-        output_config: :esds
-      })
-      |> via_in(Pad.ref(:input, "audio_128k"),
-        options: [
-          encoding: :AAC,
-          build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
-            %HLS.AlternativeRendition{
-              uri: uri,
-              name: "Audio (EN)",
-              type: :audio,
-              group_id: "program_audio",
-              language: "en",
-              channels: to_string(format.codecs.mp4a.channels),
-              autoselect: true,
-              default: true
             }
           end
         ]
