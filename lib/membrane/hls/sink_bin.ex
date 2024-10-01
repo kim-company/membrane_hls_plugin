@@ -195,11 +195,11 @@ defmodule Membrane.HLS.SinkBin do
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: state.opts.target_segment_duration - Membrane.Time.second(),
         headers: [
-          %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"},
-          %Subtitle.WebVTT.HeaderLine{
-            key: :x_timestamp_map,
-            original: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:90000"
-          }
+          %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"}
+          # %Subtitle.WebVTT.HeaderLine{
+          #   key: :x_timestamp_map,
+          #   original: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:90000"
+          # }
         ]
       })
       |> child({:sink, track_id}, %Membrane.HLS.WebVTTSink{

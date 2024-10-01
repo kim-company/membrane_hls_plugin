@@ -31,7 +31,8 @@ defmodule Membrane.HLS.MixProject do
       {:kim_q, "~> 1.0"},
       {:kim_hls, github: "kim-company/kim_hls"},
       {:membrane_text_format, github: "kim-company/membrane_text_format"},
-      {:membrane_webvtt_plugin, github: "kim-company/membrane_webvtt_plugin"}
+      {:membrane_webvtt_plugin, github: "kim-company/membrane_webvtt_plugin"},
+      {:membrane_flv_plugin, "~> 0.13", only: :test}
     ]
   end
 

@@ -13,10 +13,15 @@ defmodule Membrane.HLS.SinkBinTest do
         storage: HLS.Storage.File.new()
       }),
 
-      # Audio
-      child(:aac_source, %Membrane.File.Source{
-        location: "test/fixtures/samples_big-buck-bunny_bun33s.aac"
+      # Source
+      child(:source, %Membrane.File.Source{
+        location: "test/fixtures/avsync.flv"
       })
+      |> child(:demuxer, Membrane.FLV.Demuxer),
+
+      # Audio
+      get_child(:demuxer)
+      |> via_out(Pad.ref(:audio, 0))
       |> child(:aac_parser, %Membrane.AAC.Parser{
         out_encapsulation: :none,
         output_config: :esds
@@ -50,24 +55,24 @@ defmodule Membrane.HLS.SinkBinTest do
             metadata: %{to: Membrane.Time.milliseconds(99)}
           },
           %Membrane.Buffer{
-            payload: "Subtitle from start to 5s",
+            payload: "Subtitle from start to 6s",
             pts: Membrane.Time.milliseconds(100),
-            metadata: %{to: Membrane.Time.seconds(5)}
+            metadata: %{to: Membrane.Time.seconds(6) - Membrane.Time.millisecond()}
           },
           %Membrane.Buffer{
             payload: "",
-            pts: Membrane.Time.seconds(5) + Membrane.Time.millisecond(),
-            metadata: %{to: Membrane.Time.seconds(11)}
+            pts: Membrane.Time.seconds(6),
+            metadata: %{to: Membrane.Time.seconds(12) - Membrane.Time.millisecond()}
           },
           %Membrane.Buffer{
-            payload: "Subtitle from 11s to 15s",
-            pts: Membrane.Time.seconds(11) + Membrane.Time.millisecond(),
-            metadata: %{to: Membrane.Time.seconds(15)}
+            payload: "Subtitle from 12s to 16s",
+            pts: Membrane.Time.seconds(12),
+            metadata: %{to: Membrane.Time.seconds(16) - Membrane.Time.millisecond()}
           },
           %Membrane.Buffer{
             payload: "",
-            pts: Membrane.Time.seconds(15) + Membrane.Time.millisecond(),
-            metadata: %{to: Membrane.Time.seconds(32)}
+            pts: Membrane.Time.seconds(16),
+            metadata: %{to: Membrane.Time.seconds(30) - Membrane.Time.millisecond()}
           }
         ]
       })
@@ -90,9 +95,9 @@ defmodule Membrane.HLS.SinkBinTest do
       |> get_child(:sink),
 
       # Video
-      child(:h264_source, %Membrane.File.Source{
-        location: "test/fixtures/samples_big-buck-bunny_bun33s_720x480.h264"
-      })
+      # Audio
+      get_child(:demuxer)
+      |> via_out(Pad.ref(:video, 0))
       |> child(:h264_parser, %Membrane.H264.Parser{
         generate_best_effort_timestamps: %{framerate: {25, 1}},
         output_stream_structure: :avc1
@@ -105,7 +110,7 @@ defmodule Membrane.HLS.SinkBinTest do
               uri: uri,
               bandwidth: 850_000,
               resolution: format.resolution,
-              frame_rate: 25.0,
+              frame_rate: 30.0,
               codecs: [],
               audio: "audio",
               subtitles: "subtitles"
