@@ -23,7 +23,7 @@ defmodule Membrane.HLS.Shifter do
     shifted_buffer = %{
       buffer
       | pts: buffer.pts + state.duration,
-        dts: Membrane.Buffer.get_dts_or_pts(buffer) + state.duration,
+        dts: if(buffer.dts, do: buffer.dts + state.duration),
         metadata: update_metadata(buffer.metadata, state.duration)
     }
 

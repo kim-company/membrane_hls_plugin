@@ -86,7 +86,8 @@ defmodule Membrane.HLS.SinkBin do
         Packager.new(
           storage: state.opts.storage,
           manifest_uri: state.opts.manifest_uri,
-          resume_finished_tracks: true
+          resume_finished_tracks: true,
+          restore_pending_segments: false
         )
       end)
 
