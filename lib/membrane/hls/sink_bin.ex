@@ -196,10 +196,6 @@ defmodule Membrane.HLS.SinkBin do
         segment_duration: state.opts.target_segment_duration - Membrane.Time.second(),
         headers: [
           %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"}
-          # %Subtitle.WebVTT.HeaderLine{
-          #   key: :x_timestamp_map,
-          #   original: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:90000"
-          # }
         ]
       })
       |> child({:sink, track_id}, %Membrane.HLS.WebVTTSink{
