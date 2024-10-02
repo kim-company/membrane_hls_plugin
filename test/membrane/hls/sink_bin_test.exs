@@ -29,6 +29,7 @@ defmodule Membrane.HLS.SinkBinTest do
       |> via_in(Pad.ref(:input, "audio_128k"),
         options: [
           encoding: :AAC,
+          segment_duration: Membrane.Time.seconds(6),
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.AlternativeRendition{
               uri: uri,
@@ -79,6 +80,7 @@ defmodule Membrane.HLS.SinkBinTest do
       |> via_in(Pad.ref(:input, "subtitles"),
         options: [
           encoding: :TEXT,
+          segment_duration: Membrane.Time.seconds(6),
           build_stream: fn uri, %Membrane.Text{} = format ->
             %HLS.AlternativeRendition{
               uri: uri,
@@ -105,6 +107,7 @@ defmodule Membrane.HLS.SinkBinTest do
       |> via_in(Pad.ref(:input, "video_460x720"),
         options: [
           encoding: :H264,
+          segment_duration: Membrane.Time.seconds(6),
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: uri,

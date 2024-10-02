@@ -63,6 +63,12 @@ defmodule Membrane.HLS.SinkBin do
           (URI.t(), Membrane.CMAF.Track.t() ->
              HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
         description: "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`."
+      ],
+      segment_duration: [
+        spec: Membrane.Time.t(),
+        description: """
+        Duration for a HLS segment.
+        """
       ]
     ]
   )
@@ -129,7 +135,7 @@ defmodule Membrane.HLS.SinkBin do
       # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-        segment_min_duration: segment_min_duration_audio(state)
+        segment_min_duration: pad_opts.segment_duration
       })
       |> via_out(Pad.ref(:output), options: [tracks: [track_id]])
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
@@ -154,7 +160,7 @@ defmodule Membrane.HLS.SinkBin do
       bin_input(pad)
       # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-        segment_min_duration: segment_min_duration_video(state)
+        segment_min_duration: pad_opts.segment_duration
       })
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
         packager_pid: state.packager_pid,
@@ -179,7 +185,7 @@ defmodule Membrane.HLS.SinkBin do
       # |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
       |> child({:cues, track_id}, Membrane.WebVTT.CueBuilderFilter)
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
-        segment_duration: state.opts.target_segment_duration - Membrane.Time.second(),
+        segment_duration: pad_opts.segment_duration,
         headers: [
           %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"}
         ]
@@ -243,14 +249,6 @@ defmodule Membrane.HLS.SinkBin do
     |> Enum.filter(&match?({:sink, _}, &1))
     |> MapSet.new()
     |> MapSet.equal?(ended_sinks)
-  end
-
-  defp segment_min_duration_video(state) do
-    state.opts.target_segment_duration - Membrane.Time.seconds(2)
-  end
-
-  defp segment_min_duration_audio(state) do
-    state.opts.target_segment_duration - Membrane.Time.seconds(1)
   end
 
   defp resume_info(packager_pid, track_id) do

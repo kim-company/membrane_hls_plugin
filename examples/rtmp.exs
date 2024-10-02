@@ -39,6 +39,7 @@ defmodule Pipeline do
       |> via_in(Pad.ref(:input, "audio_128k"),
         options: [
           encoding: :AAC,
+          segment_duration: Membrane.Time.seconds(6),
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.AlternativeRendition{
               uri: uri,
@@ -75,6 +76,7 @@ defmodule Pipeline do
       |> via_in(Pad.ref(:input, "video_720p"),
         options: [
           encoding: :H264,
+          segment_duration: Membrane.Time.seconds(6),
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: uri,
@@ -108,6 +110,7 @@ defmodule Pipeline do
       |> via_in(Pad.ref(:input, "video_360p"),
         options: [
           encoding: :H264,
+          segment_duration: Membrane.Time.seconds(6),
           build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: uri,
