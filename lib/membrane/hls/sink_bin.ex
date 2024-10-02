@@ -205,7 +205,7 @@ defmodule Membrane.HLS.SinkBin do
     ended_sinks = MapSet.put(state.ended_sinks, sink)
 
     if all_streams_ended?(ctx, ended_sinks) do
-      if state.flush, do: Agent.update(state.packager_pid, &Packager.flush(&1))
+      if state.flush, do: Agent.update(state.packager_pid, &Packager.flush(&1), :infinity)
 
       state =
         state
@@ -236,9 +236,13 @@ defmodule Membrane.HLS.SinkBin do
       "Packager: syncing playlists up to #{state.live_state.next_sync_point}s"
     )
 
-    Agent.update(state.packager_pid, fn p ->
-      Packager.sync(p, state.live_state.next_sync_point)
-    end)
+    Agent.update(
+      state.packager_pid,
+      fn p ->
+        Packager.sync(p, state.live_state.next_sync_point)
+      end,
+      :infinity
+    )
 
     {[], live_schedule_next_sync(state)}
   end
@@ -252,23 +256,27 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   defp resume_info(packager_pid, track_id) do
-    Agent.get(packager_pid, fn packager ->
-      max_pts =
-        Packager.max_track_duration(packager)
-        |> Ratio.new()
-        |> Membrane.Time.seconds()
-
-      track_pts =
-        if Packager.has_track?(packager, track_id) do
-          Packager.track_duration(packager, track_id)
+    Agent.get(
+      packager_pid,
+      fn packager ->
+        max_pts =
+          Packager.max_track_duration(packager)
           |> Ratio.new()
           |> Membrane.Time.seconds()
-        else
-          0
-        end
 
-      {max_pts, track_pts}
-    end)
+        track_pts =
+          if Packager.has_track?(packager, track_id) do
+            Packager.track_duration(packager, track_id)
+            |> Ratio.new()
+            |> Membrane.Time.seconds()
+          else
+            0
+          end
+
+        {max_pts, track_pts}
+      end,
+      :infinity
+    )
   end
 
   defp live_schedule_next_sync(state) do
@@ -293,7 +301,8 @@ defmodule Membrane.HLS.SinkBin do
         &Packager.next_sync_point(
           &1,
           Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
-        )
+        ),
+        :infinity
       )
 
     {:live, safety_delay} = state.opts.mode

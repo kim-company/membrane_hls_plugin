@@ -38,39 +38,47 @@ defmodule Membrane.HLS.WebVTTSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    Agent.update(state.opts.packager_pid, fn packager ->
-      if Packager.has_track?(packager, track_id) do
-        # Packager.discontinue_track(packager, track_id)
-        packager
-      else
-        uri = Packager.new_variant_uri(packager, track_id)
+    Agent.update(
+      state.opts.packager_pid,
+      fn packager ->
+        if Packager.has_track?(packager, track_id) do
+          # Packager.discontinue_track(packager, track_id)
+          packager
+        else
+          uri = Packager.new_variant_uri(packager, track_id)
 
-        Packager.add_track(
-          packager,
-          track_id,
-          stream: state.opts.build_stream.(uri, format),
-          segment_extension: ".vtt",
-          target_segment_duration: target_segment_duration
-        )
-      end
-    end)
+          Packager.add_track(
+            packager,
+            track_id,
+            stream: state.opts.build_stream.(uri, format),
+            segment_extension: ".vtt",
+            target_segment_duration: target_segment_duration
+          )
+        end
+      end,
+      :infinity
+    )
 
     {[], state}
   end
 
   def handle_buffer(:input, buffer, _ctx, state) do
     {job_ref, upload_fun} =
-      Agent.get_and_update(state.opts.packager_pid, fn packager ->
-        {packager, {ref, upload_fun}} =
-          Packager.put_segment_async(
-            packager,
-            state.opts.track_id,
-            buffer.payload,
-            Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
-          )
+      Agent.get_and_update(
+        state.opts.packager_pid,
+        fn packager ->
+          {packager, {ref, upload_fun}} =
+            Packager.put_segment_async(
+              packager,
+              state.opts.track_id,
+              buffer.payload,
+              Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
+            )
 
-        {{ref, upload_fun}, packager}
-      end)
+          {{ref, upload_fun}, packager}
+        end,
+        :infinity
+      )
 
     task = Task.async(upload_fun)
 
@@ -82,9 +90,13 @@ defmodule Membrane.HLS.WebVTTSink do
 
     {data, state} = pop_in(state, [:upload_tasks, task_ref])
 
-    Agent.update(state.opts.packager_pid, fn packager ->
-      Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
-    end)
+    Agent.update(
+      state.opts.packager_pid,
+      fn packager ->
+        Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
+      end,
+      :infinity
+    )
 
     {[], state}
   end
@@ -100,11 +112,15 @@ defmodule Membrane.HLS.WebVTTSink do
     |> Enum.map(& &1.task)
     |> Task.await_many(:infinity)
 
-    Agent.update(state.opts.packager_pid, fn packager ->
-      Enum.reduce(state.upload_tasks, packager, fn {_task_ref, data}, packager ->
-        Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
-      end)
-    end)
+    Agent.update(
+      state.opts.packager_pid,
+      fn packager ->
+        Enum.reduce(state.upload_tasks, packager, fn {_task_ref, data}, packager ->
+          Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
+        end)
+      end,
+      :infinity
+    )
 
     {[], %{state | upload_tasks: %{}}}
   end
