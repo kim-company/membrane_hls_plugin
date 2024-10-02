@@ -128,7 +128,9 @@ defmodule Membrane.HLS.SinkBin do
       bin_input(pad)
       # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
       |> via_in(Pad.ref(:input, track_id))
-      |> audio_muxer(state)
+      |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
+        segment_min_duration: segment_min_duration_audio(state)
+      })
       |> via_out(Pad.ref(:output), options: [tracks: [track_id]])
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
         packager_pid: state.packager_pid,
@@ -143,33 +145,17 @@ defmodule Membrane.HLS.SinkBin do
   @impl true
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
-        %{pad_options: %{encoding: :H264} = pad_opts} = ctx,
+        %{pad_options: %{encoding: :H264} = pad_opts},
         state
       ) do
     {_max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
 
-    had_video_input? =
-      Enum.any?(ctx.pads, fn {Pad.ref(:input, id), data} ->
-        id != track_id and data.options.encoding == :H264
-      end)
-
-    muxer = fn spec ->
-      if had_video_input? do
-        child(spec, {:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
-          segment_min_duration: segment_min_duration(state)
-        })
-      else
-        spec
-        |> via_in(Pad.ref(:input, track_id))
-        |> audio_muxer(state)
-        |> via_out(Pad.ref(:output), options: [tracks: [track_id]])
-      end
-    end
-
     spec =
       bin_input(pad)
       # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
-      |> muxer.()
+      |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
+        segment_min_duration: segment_min_duration_video(state)
+      })
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
         packager_pid: state.packager_pid,
         track_id: track_id,
@@ -259,19 +245,12 @@ defmodule Membrane.HLS.SinkBin do
     |> MapSet.equal?(ended_sinks)
   end
 
-  defp audio_muxer(spec, state) do
-    child(
-      spec,
-      {:muxer, :audio},
-      %Membrane.MP4.Muxer.CMAF{
-        segment_min_duration: segment_min_duration(state)
-      },
-      get_if_exists: true
-    )
+  defp segment_min_duration_video(state) do
+    state.opts.target_segment_duration - Membrane.Time.seconds(2)
   end
 
-  defp segment_min_duration(state) do
-    state.opts.target_segment_duration - Membrane.Time.seconds(2)
+  defp segment_min_duration_audio(state) do
+    state.opts.target_segment_duration - Membrane.Time.seconds(1)
   end
 
   defp resume_info(packager_pid, track_id) do
