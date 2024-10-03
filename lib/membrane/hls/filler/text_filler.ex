@@ -23,17 +23,23 @@ defmodule Membrane.HLS.TextFiller do
     if state.filled do
       {[forward: buffer], state}
     else
-      Membrane.Logger.debug(
-        "Generated empty text buffer with a duration of #{buffer.pts - state.from - Membrane.Time.millisecond()}"
-      )
+      duration = buffer.pts - state.from - Membrane.Time.millisecond()
 
-      silence_buffer = %Membrane.Buffer{
-        payload: "",
-        pts: state.from,
-        metadata: %{to: buffer.pts - Membrane.Time.millisecond()}
-      }
+      if duration > 0 do
+        Membrane.Logger.warning(
+          "Generated empty text buffer with a duration of #{buffer.pts - state.from - Membrane.Time.millisecond()}"
+        )
 
-      {[buffer: {:output, [silence_buffer, buffer]}], %{state | filled: true}}
+        silence_buffer = %Membrane.Buffer{
+          payload: "",
+          pts: state.from,
+          metadata: %{to: buffer.pts - Membrane.Time.millisecond()}
+        }
+
+        {[buffer: {:output, [silence_buffer, buffer]}], %{state | filled: true}}
+      else
+        {[forward: buffer], state}
+      end
     end
   end
 end

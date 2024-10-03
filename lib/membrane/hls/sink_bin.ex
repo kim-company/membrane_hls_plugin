@@ -128,11 +128,11 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :AAC} = pad_opts},
         state
       ) do
-    {_max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
+    {max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -154,11 +154,11 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :H264} = pad_opts},
         state
       ) do
-    {_max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
+    {max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
       })
@@ -177,12 +177,12 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :TEXT} = pad_opts},
         state
       ) do
-    {_max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
+    {max_pts, track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      # |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
-      # |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
       |> child({:cues, track_id}, Membrane.WebVTT.CueBuilderFilter)
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: pad_opts.segment_duration,
