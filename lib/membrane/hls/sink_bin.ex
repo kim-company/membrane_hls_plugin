@@ -205,14 +205,17 @@ defmodule Membrane.HLS.SinkBin do
     ended_sinks = MapSet.put(state.ended_sinks, sink)
 
     if all_streams_ended?(ctx, ended_sinks) do
-      if state.flush, do: Agent.update(state.packager_pid, &Packager.flush(&1), :infinity)
-
       state =
         state
         |> put_in([:live_state], %{stop: true})
         |> put_in([:ended_sinks], ended_sinks)
 
-      {[notify_parent: :end_of_stream], state}
+      if state.flush do
+        Agent.update(state.packager_pid, &Packager.flush/1, :infinity)
+        {[notify_parent: :end_of_stream], state}
+      else
+        {[], state}
+      end
     else
       {[], %{state | ended_sinks: ended_sinks}}
     end
@@ -222,8 +225,13 @@ defmodule Membrane.HLS.SinkBin do
     {[], state}
   end
 
-  def handle_child_notification(:flush, _, _ctx, state) do
-    {[], %{state | flush: true}}
+  def handle_child_notification(:flush, _, ctx, state) do
+    if not state.flush and all_streams_ended?(ctx, state.ended_sinks) do
+      Agent.update(state.packager_pid, &Packager.flush/1, :infinity)
+      {[notify_parent: :end_of_stream], state}
+    else
+      {[], %{state | flush: true}}
+    end
   end
 
   @impl true
