@@ -183,7 +183,7 @@ defmodule Membrane.HLS.SinkBin do
       bin_input(pad)
       |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
       |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
-      |> child({:cues, track_id}, Membrane.WebVTT.CueBuilderFilter)
+      |> child({:cues, track_id}, %Membrane.WebVTT.CueBuilderFilter{min_duration: 1500})
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: pad_opts.segment_duration,
         headers: [
