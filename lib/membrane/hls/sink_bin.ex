@@ -229,7 +229,7 @@ defmodule Membrane.HLS.SinkBin do
   def handle_parent_notification(:flush, ctx, state) do
     if not state.flush and all_streams_ended?(ctx, state.ended_sinks) do
       Agent.update(state.packager_pid, &Packager.flush/1, :infinity)
-      {[notify_parent: :end_of_stream], state}
+      {[notify_parent: :end_of_stream], %{state | flush: true}}
     else
       {[], %{state | flush: true}}
     end
