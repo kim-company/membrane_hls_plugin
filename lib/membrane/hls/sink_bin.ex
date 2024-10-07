@@ -319,16 +319,18 @@ defmodule Membrane.HLS.SinkBin do
     {:live, safety_delay} = state.opts.mode
     now = :erlang.monotonic_time(:millisecond)
 
+    target_segment_duration_ms =
+      Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
+
     # We wait until we have at least 3 segments before starting the initial sync process.
     # This ensures a stable, interruption free playback for the clients.
-    minimum_segment_time =
-      Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round) * 2
-
-    # Tells when we should do it.
-    deadline = now + Membrane.Time.as_milliseconds(safety_delay, :round) + minimum_segment_time
+    deadline =
+      now + Membrane.Time.as_milliseconds(safety_delay, :round) + target_segment_duration_ms * 3
 
     live_state = %{
-      next_sync_point: next_sync_point + div(minimum_segment_time, 1000),
+      # The next_sync_point is already rounded to the next segment. So we add two more segments to
+      # reach the minimum of 3 segments.
+      next_sync_point: next_sync_point + div(target_segment_duration_ms * 2, 1000),
       next_deadline: deadline,
       stop: false
     }
