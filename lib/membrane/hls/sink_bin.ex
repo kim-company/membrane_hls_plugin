@@ -325,10 +325,10 @@ defmodule Membrane.HLS.SinkBin do
       Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round) * 3
 
     # Tells when we should do it.
-    deadline = now + minimum_segment_time + Membrane.Time.as_milliseconds(safety_delay, :round)
+    deadline = now + Membrane.Time.as_milliseconds(safety_delay, :round) + minimum_segment_time
 
     live_state = %{
-      next_sync_point: next_sync_point,
+      next_sync_point: next_sync_point + div(minimum_segment_time, 1000),
       next_deadline: deadline,
       stop: false
     }
