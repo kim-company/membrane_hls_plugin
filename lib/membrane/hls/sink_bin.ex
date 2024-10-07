@@ -322,7 +322,7 @@ defmodule Membrane.HLS.SinkBin do
     # We wait until we have at least 3 segments before starting the initial sync process.
     # This ensures a stable, interruption free playback for the clients.
     minimum_segment_time =
-      Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round) * 3
+      Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round) * 2
 
     # Tells when we should do it.
     deadline = now + Membrane.Time.as_milliseconds(safety_delay, :round) + minimum_segment_time
