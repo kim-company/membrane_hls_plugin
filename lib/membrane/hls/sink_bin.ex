@@ -104,11 +104,8 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :AAC} = pad_opts},
         state
       ) do
-    {_max_pts, track_pts} = resume_info(state.opts.packager_pid, track_id)
-
     spec =
       bin_input(pad)
-      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -130,11 +127,8 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :H264} = pad_opts},
         state
       ) do
-    {_max_pts, track_pts} = resume_info(state.opts.packager_pid, track_id)
-
     spec =
       bin_input(pad)
-      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
       })
@@ -153,12 +147,8 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :TEXT} = pad_opts},
         state
       ) do
-    {_max_pts, track_pts} = resume_info(state.opts.packager_pid, track_id)
-
     spec =
       bin_input(pad)
-      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
-      |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
       |> child({:cues, track_id}, %Membrane.WebVTT.CueBuilderFilter{
         min_duration: Membrane.Time.milliseconds(1500)
       })
@@ -237,30 +227,6 @@ defmodule Membrane.HLS.SinkBin do
     |> Enum.filter(&match?({:sink, _}, &1))
     |> MapSet.new()
     |> MapSet.equal?(ended_sinks)
-  end
-
-  defp resume_info(packager_pid, track_id) do
-    Agent.get(
-      packager_pid,
-      fn packager ->
-        max_pts =
-          Packager.max_track_duration(packager)
-          |> Ratio.new()
-          |> Membrane.Time.seconds()
-
-        track_pts =
-          if Packager.has_track?(packager, track_id) do
-            Packager.track_duration(packager, track_id)
-            |> Ratio.new()
-            |> Membrane.Time.seconds()
-          else
-            0
-          end
-
-        {max_pts, track_pts}
-      end,
-      :infinity
-    )
   end
 
   defp live_schedule_next_sync(state) do
