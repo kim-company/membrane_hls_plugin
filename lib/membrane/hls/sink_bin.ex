@@ -128,11 +128,11 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :AAC} = pad_opts},
         state
       ) do
-    {max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
+    {_max_pts, track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -154,11 +154,11 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :H264} = pad_opts},
         state
       ) do
-    {max_pts, _track_pts} = resume_info(state.packager_pid, track_id)
+    {_max_pts, track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
       })
@@ -177,11 +177,11 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :TEXT} = pad_opts},
         state
       ) do
-    {max_pts, track_pts} = resume_info(state.packager_pid, track_id)
+    {_max_pts, track_pts} = resume_info(state.packager_pid, track_id)
 
     spec =
       bin_input(pad)
-      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: max_pts})
+      |> child({:shifter, track_id}, %Membrane.HLS.Shifter{duration: track_pts})
       |> child({:filler, track_id}, %Membrane.HLS.TextFiller{from: track_pts})
       |> child({:cues, track_id}, %Membrane.WebVTT.CueBuilderFilter{
         min_duration: Membrane.Time.milliseconds(1500)
@@ -212,12 +212,9 @@ defmodule Membrane.HLS.SinkBin do
         |> put_in([:live_state], %{stop: true})
         |> put_in([:ended_sinks], ended_sinks)
 
-      if state.flush do
-        Agent.update(state.packager_pid, &Packager.flush/1, :infinity)
-        {[notify_parent: :end_of_stream], state}
-      else
-        {[], state}
-      end
+      if state.flush, do: Agent.update(state.packager_pid, &Packager.flush/1, :infinity)
+
+      {[notify_parent: :end_of_stream], state}
     else
       {[], %{state | ended_sinks: ended_sinks}}
     end
