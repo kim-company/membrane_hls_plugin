@@ -9,18 +9,10 @@ defmodule Membrane.HLS.SinkBin do
   require Membrane.Logger
 
   def_options(
-    manifest_uri: [
-      spec: URI.t(),
+    packager_pid: [
+      spec: pid(),
       description: """
-      Destination URI of the manifest.
-      Example: file://output/stream.m3u8
-      """
-    ],
-    storage: [
-      spec: HLS.Storage,
-      required: true,
-      description: """
-      Implementation of the storage.
+      PID of a `HLS.Packager` which must be wrapped in an Agent (for now).
       """
     ],
     target_segment_duration: [
@@ -79,25 +71,9 @@ defmodule Membrane.HLS.SinkBin do
      %{
        opts: opts,
        flush: opts.flush_on_end,
-       packager_pid: nil,
        ended_sinks: MapSet.new(),
        live_state: nil
      }}
-  end
-
-  @impl true
-  def handle_setup(_context, state) do
-    {:ok, packager_pid} =
-      Agent.start_link(fn ->
-        Packager.new(
-          storage: state.opts.storage,
-          manifest_uri: state.opts.manifest_uri,
-          resume_finished_tracks: true,
-          restore_pending_segments: false
-        )
-      end)
-
-    {[], %{state | packager_pid: packager_pid}}
   end
 
   @impl true
@@ -128,7 +104,7 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :AAC} = pad_opts},
         state
       ) do
-    {_max_pts, track_pts} = resume_info(state.packager_pid, track_id)
+    {_max_pts, track_pts} = resume_info(state.opts.packager_pid, track_id)
 
     spec =
       bin_input(pad)
@@ -139,7 +115,7 @@ defmodule Membrane.HLS.SinkBin do
       })
       |> via_out(Pad.ref(:output), options: [tracks: [track_id]])
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
-        packager_pid: state.packager_pid,
+        packager_pid: state.opts.packager_pid,
         track_id: track_id,
         target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
@@ -154,7 +130,7 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :H264} = pad_opts},
         state
       ) do
-    {_max_pts, track_pts} = resume_info(state.packager_pid, track_id)
+    {_max_pts, track_pts} = resume_info(state.opts.packager_pid, track_id)
 
     spec =
       bin_input(pad)
@@ -163,7 +139,7 @@ defmodule Membrane.HLS.SinkBin do
         segment_min_duration: pad_opts.segment_duration
       })
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
-        packager_pid: state.packager_pid,
+        packager_pid: state.opts.packager_pid,
         track_id: track_id,
         target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
@@ -177,7 +153,7 @@ defmodule Membrane.HLS.SinkBin do
         %{pad_options: %{encoding: :TEXT} = pad_opts},
         state
       ) do
-    {_max_pts, track_pts} = resume_info(state.packager_pid, track_id)
+    {_max_pts, track_pts} = resume_info(state.opts.packager_pid, track_id)
 
     spec =
       bin_input(pad)
@@ -193,7 +169,7 @@ defmodule Membrane.HLS.SinkBin do
         ]
       })
       |> child({:sink, track_id}, %Membrane.HLS.WebVTTSink{
-        packager_pid: state.packager_pid,
+        packager_pid: state.opts.packager_pid,
         track_id: track_id,
         target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
@@ -212,7 +188,7 @@ defmodule Membrane.HLS.SinkBin do
         |> put_in([:live_state], %{stop: true})
         |> put_in([:ended_sinks], ended_sinks)
 
-      if state.flush, do: Agent.update(state.packager_pid, &Packager.flush/1, :infinity)
+      if state.flush, do: Agent.update(state.opts.packager_pid, &Packager.flush/1, :infinity)
 
       {[notify_parent: :end_of_stream], state}
     else
@@ -227,7 +203,7 @@ defmodule Membrane.HLS.SinkBin do
   @impl true
   def handle_parent_notification(:flush, ctx, state) do
     if not state.flush and all_streams_ended?(ctx, state.ended_sinks) do
-      Agent.update(state.packager_pid, &Packager.flush/1, :infinity)
+      Agent.update(state.opts.packager_pid, &Packager.flush/1, :infinity)
       {[notify_parent: :end_of_stream], %{state | flush: true}}
     else
       {[], %{state | flush: true}}
@@ -245,7 +221,7 @@ defmodule Membrane.HLS.SinkBin do
     )
 
     Agent.update(
-      state.packager_pid,
+      state.opts.packager_pid,
       fn p ->
         Packager.sync(p, state.live_state.next_sync_point)
       end,
@@ -305,7 +281,7 @@ defmodule Membrane.HLS.SinkBin do
     # Tells where in the playlist we should start issuing segments.
     next_sync_point =
       Agent.get(
-        state.packager_pid,
+        state.opts.packager_pid,
         &Packager.next_sync_point(
           &1,
           Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)

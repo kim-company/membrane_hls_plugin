@@ -6,11 +6,20 @@ defmodule Membrane.HLS.SinkBinTest do
 
   @tag :tmp_dir
   test "on a new stream", %{tmp_dir: tmp_dir} do
+    {:ok, packager_pid} =
+      Agent.start_link(fn ->
+        HLS.Packager.new(
+          manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
+          storage: HLS.Storage.File.new(),
+          resume_finished_tracks: true,
+          restore_pending_segments: false
+        )
+      end)
+
     spec = [
       child(:sink, %Membrane.HLS.SinkBin{
-        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
-        target_segment_duration: Membrane.Time.seconds(7),
-        storage: HLS.Storage.File.new()
+        packager_pid: packager_pid,
+        target_segment_duration: Membrane.Time.seconds(7)
       }),
 
       # Source

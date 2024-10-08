@@ -15,6 +15,16 @@ defmodule Pipeline do
   def handle_init(_ctx, _opts) do
     File.rm_rf("tmp")
 
+    {:ok, packager_pid} =
+      Agent.start_link(fn ->
+        HLS.Packager.new(
+          storage: HLS.Storage.File.new(),
+          manifest_uri: URI.new!("file://tmp/stream.m3u8"),
+          resume_finished_tracks: true,
+          restore_pending_segments: false
+        )
+      end)
+
     structure = [
       # Source
       child(:source, %Membrane.RTMP.Source{
@@ -24,9 +34,8 @@ defmodule Pipeline do
       
       # Sink
       child(:sink, %Membrane.HLS.SinkBin{
-        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
+        packager_pid: packager_pid,
         target_segment_duration: Membrane.Time.seconds(7),
-        storage: HLS.Storage.File.new()
       }),
 
       # Audio
