@@ -8,7 +8,7 @@ defmodule Membrane.HLS.WebVTTSink do
   )
 
   def_options(
-    packager_pid: [
+    packager: [
       spec: pid(),
       description: "PID of the packager."
     ],
@@ -17,8 +17,7 @@ defmodule Membrane.HLS.WebVTTSink do
       description: "ID of the track."
     ],
     build_stream: [
-      spec:
-        (URI.t(), Membrane.CMAF.Track.t() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
+      spec: (Membrane.CMAF.Track.t() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
       description: "Build the stream with the given stream format"
     ],
     target_segment_duration: [
@@ -38,90 +37,30 @@ defmodule Membrane.HLS.WebVTTSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    Agent.update(
-      state.opts.packager_pid,
-      fn packager ->
-        if Packager.has_track?(packager, track_id) do
-          # Packager.discontinue_track(packager, track_id)
-          packager
-        else
-          uri = Packager.new_variant_uri(packager, track_id)
-
-          Packager.add_track(
-            packager,
-            track_id,
-            stream: state.opts.build_stream.(uri, format),
-            segment_extension: ".vtt",
-            target_segment_duration: target_segment_duration
-          )
-        end
-      end,
-      :infinity
-    )
+    if Packager.has_track?(state.opts.packager, track_id) do
+      # TODO: Render this configurable
+      # Packager.discontinue_track(packager, track_id)
+    else
+      Packager.add_track(
+        state.opts.packager,
+        track_id,
+        stream: state.opts.build_stream.(format),
+        segment_extension: ".vtt",
+        target_segment_duration: target_segment_duration
+      )
+    end
 
     {[], state}
   end
 
   def handle_buffer(:input, buffer, _ctx, state) do
-    {job_ref, upload_fun} =
-      Agent.get_and_update(
-        state.opts.packager_pid,
-        fn packager ->
-          {packager, {ref, upload_fun}} =
-            Packager.put_segment_async(
-              packager,
-              state.opts.track_id,
-              buffer.payload,
-              Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
-            )
-
-          {{ref, upload_fun}, packager}
-        end,
-        :infinity
-      )
-
-    task = Task.async(upload_fun)
-
-    {[], put_in(state, [:upload_tasks, task.ref], %{job_ref: job_ref, task: task})}
-  end
-
-  def handle_info({task_ref, :ok}, _ctx, state) do
-    Process.demonitor(task_ref, [:flush])
-
-    {data, state} = pop_in(state, [:upload_tasks, task_ref])
-
-    Agent.update(
-      state.opts.packager_pid,
-      fn packager ->
-        Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
-      end,
-      :infinity
+    Packager.put_segment(
+      state.opts.packager,
+      state.opts.track_id,
+      buffer.payload,
+      Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
     )
 
     {[], state}
-  end
-
-  def handle_info({:DOWN, _ref, _, _, reason}, _ctx, state) do
-    raise "Cannot write segment of track #{state.track_id} with reason: #{inspect(reason)}."
-    {[], state}
-  end
-
-  def handle_end_of_stream(:input, _ctx, state) do
-    state.upload_tasks
-    |> Map.values()
-    |> Enum.map(& &1.task)
-    |> Task.await_many(:infinity)
-
-    Agent.update(
-      state.opts.packager_pid,
-      fn packager ->
-        Enum.reduce(state.upload_tasks, packager, fn {_task_ref, data}, packager ->
-          Packager.ack_segment(packager, state.opts.track_id, data.job_ref)
-        end)
-      end,
-      :infinity
-    )
-
-    {[], %{state | upload_tasks: %{}}}
   end
 end
