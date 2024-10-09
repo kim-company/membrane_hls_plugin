@@ -210,8 +210,7 @@ defmodule Membrane.HLS.SinkBin do
       "Packager: syncing playlists up to #{state.live_state.next_sync_point}s"
     )
 
-    # TODO: Move to packager
-    # Packager.sync(state.opts.packager, state.live_state.next_sync_point)
+    Packager.sync(state.opts.packager, state.live_state.next_sync_point)
 
     {[], live_schedule_next_sync(state)}
   end
@@ -240,14 +239,11 @@ defmodule Membrane.HLS.SinkBin do
 
   defp live_init_state(state) do
     # Tells where in the playlist we should start issuing segments.
-    # next_sync_point =
-    # Packager.next_sync_point(
-    #   state.opts.packager,
-    #   Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
-    # )
-
-    # TODO: Move this to the Packager
-    next_sync_point = 7
+    next_sync_point =
+      Packager.next_sync_point(
+        state.opts.packager,
+        Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
+      )
 
     {:live, safety_delay} = state.opts.mode
     now = :erlang.monotonic_time(:millisecond)
