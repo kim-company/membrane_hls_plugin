@@ -132,7 +132,7 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
-    assert_pipeline_notified(pipeline, :sink, :end_of_stream, 10_000)
+    assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
     :ok = Membrane.Pipeline.terminate(pipeline)
   end
 end
