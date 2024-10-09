@@ -9,10 +9,10 @@ defmodule Membrane.HLS.SinkBin do
   require Membrane.Logger
 
   def_options(
-    packager_pid: [
+    packager: [
       spec: pid(),
       description: """
-      PID of a `HLS.Packager` which must be wrapped in an Agent (for now).
+      PID of a `HLS.Packager`.
       """
     ],
     target_segment_duration: [
@@ -52,7 +52,7 @@ defmodule Membrane.HLS.SinkBin do
       ],
       build_stream: [
         spec:
-          (URI.t(), Membrane.CMAF.Track.t() ->
+          (Membrane.CMAF.Track.t() ->
              HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
         description: "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`."
       ],
@@ -112,7 +112,7 @@ defmodule Membrane.HLS.SinkBin do
       })
       |> via_out(Pad.ref(:output), options: [tracks: [track_id]])
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
-        packager_pid: state.opts.packager_pid,
+        packager: state.opts.packager,
         track_id: track_id,
         target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
@@ -133,7 +133,7 @@ defmodule Membrane.HLS.SinkBin do
         segment_min_duration: pad_opts.segment_duration
       })
       |> child({:sink, track_id}, %Membrane.HLS.CMAFSink{
-        packager_pid: state.opts.packager_pid,
+        packager: state.opts.packager,
         track_id: track_id,
         target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
@@ -159,7 +159,7 @@ defmodule Membrane.HLS.SinkBin do
         ]
       })
       |> child({:sink, track_id}, %Membrane.HLS.WebVTTSink{
-        packager_pid: state.opts.packager_pid,
+        packager: state.opts.packager,
         track_id: track_id,
         target_segment_duration: state.opts.target_segment_duration,
         build_stream: pad_opts.build_stream
@@ -178,7 +178,7 @@ defmodule Membrane.HLS.SinkBin do
         |> put_in([:live_state], %{stop: true})
         |> put_in([:ended_sinks], ended_sinks)
 
-      if state.flush, do: Agent.update(state.opts.packager_pid, &Packager.flush/1, :infinity)
+      if state.flush, do: Packager.flush(state.opts.packager)
 
       {[notify_parent: :end_of_stream], state}
     else
@@ -193,7 +193,7 @@ defmodule Membrane.HLS.SinkBin do
   @impl true
   def handle_parent_notification(:flush, ctx, state) do
     if not state.flush and all_streams_ended?(ctx, state.ended_sinks) do
-      Agent.update(state.opts.packager_pid, &Packager.flush/1, :infinity)
+      Packager.flush(state.opts.packager)
       {[notify_parent: :end_of_stream], %{state | flush: true}}
     else
       {[], %{state | flush: true}}
@@ -210,13 +210,7 @@ defmodule Membrane.HLS.SinkBin do
       "Packager: syncing playlists up to #{state.live_state.next_sync_point}s"
     )
 
-    Agent.update(
-      state.opts.packager_pid,
-      fn p ->
-        Packager.sync(p, state.live_state.next_sync_point)
-      end,
-      :infinity
-    )
+    Packager.sync(state.opts.packager, state.live_state.next_sync_point)
 
     {[], live_schedule_next_sync(state)}
   end
@@ -246,13 +240,9 @@ defmodule Membrane.HLS.SinkBin do
   defp live_init_state(state) do
     # Tells where in the playlist we should start issuing segments.
     next_sync_point =
-      Agent.get(
-        state.opts.packager_pid,
-        &Packager.next_sync_point(
-          &1,
-          Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
-        ),
-        :infinity
+      Packager.next_sync_point(
+        state.opts.packager,
+        Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
       )
 
     {:live, safety_delay} = state.opts.mode
