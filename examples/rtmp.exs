@@ -15,15 +15,13 @@ defmodule Pipeline do
   def handle_init(_ctx, _opts) do
     File.rm_rf("tmp")
 
-    {:ok, packager_pid} =
-      Agent.start_link(fn ->
-        HLS.Packager.new(
-          storage: HLS.Storage.File.new(),
-          manifest_uri: URI.new!("file://tmp/stream.m3u8"),
-          resume_finished_tracks: true,
-          restore_pending_segments: false
-        )
-      end)
+    {:ok, packager} =
+      HLS.Packager.start_link(
+        storage: HLS.Storage.File.new(),
+        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
+        resume_finished_tracks: true,
+        restore_pending_segments: false
+      )
 
     structure = [
       # Source
@@ -34,7 +32,7 @@ defmodule Pipeline do
       
       # Sink
       child(:sink, %Membrane.HLS.SinkBin{
-        packager_pid: packager_pid,
+        packager: packager,
         target_segment_duration: Membrane.Time.seconds(7),
       }),
 
@@ -49,9 +47,8 @@ defmodule Pipeline do
         options: [
           encoding: :AAC,
           segment_duration: Membrane.Time.seconds(6),
-          build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
+          build_stream: fn %Membrane.CMAF.Track{} = format ->
             %HLS.AlternativeRendition{
-              uri: uri,
               name: "Audio (EN)",
               type: :audio,
               group_id: "program_audio",
@@ -86,9 +83,9 @@ defmodule Pipeline do
         options: [
           encoding: :H264,
           segment_duration: Membrane.Time.seconds(6),
-          build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
+          build_stream: fn %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
-              uri: uri,
+              uri: nil,
               bandwidth: 3951200,
               resolution: format.resolution,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
@@ -120,9 +117,9 @@ defmodule Pipeline do
         options: [
           encoding: :H264,
           segment_duration: Membrane.Time.seconds(6),
-          build_stream: fn uri, %Membrane.CMAF.Track{} = format ->
+          build_stream: fn %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
-              uri: uri,
+              uri: nil,
               bandwidth: 1_200_000,
               resolution: format.resolution,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),

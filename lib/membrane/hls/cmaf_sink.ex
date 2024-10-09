@@ -51,6 +51,8 @@ defmodule Membrane.HLS.CMAFSink do
       )
     end
 
+    Packager.put_init_section(state.opts.packager, track_id, format.header)
+
     {[], state}
   end
 
