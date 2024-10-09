@@ -180,7 +180,7 @@ defmodule Membrane.HLS.SinkBin do
 
       if state.flush, do: Packager.flush(state.opts.packager)
 
-      {[notify_parent: :end_of_stream], state}
+      {[notify_parent: {:end_of_stream, state.flush}], state}
     else
       {[], %{state | ended_sinks: ended_sinks}}
     end
@@ -194,7 +194,7 @@ defmodule Membrane.HLS.SinkBin do
   def handle_parent_notification(:flush, ctx, state) do
     if not state.flush and all_streams_ended?(ctx, state.ended_sinks) do
       Packager.flush(state.opts.packager)
-      {[notify_parent: :end_of_stream], %{state | flush: true}}
+      {[notify_parent: {:end_of_stream, true}], %{state | flush: true}}
     else
       {[], %{state | flush: true}}
     end
