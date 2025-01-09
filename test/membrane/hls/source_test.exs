@@ -6,15 +6,15 @@ defmodule Membrane.HLS.SourceTest do
 
   import Membrane.Testing.Assertions
 
-  @master_playlist_uri URI.new!("./test/fixtures/mpeg-ts/stream.m3u8")
+  @master_playlist_uri URI.new!("file://test/fixtures/mpeg-ts/stream.m3u8")
 
   defmodule Pipeline do
     use Membrane.Pipeline
 
     @impl true
-    def handle_init(_ctx, opts = %{reader: reader, master_playlist_uri: uri}) do
+    def handle_init(_ctx, opts = %{storage: storage, master_playlist_uri: uri}) do
       structure = [
-        child(:source, %Source{reader: reader, master_playlist_uri: uri})
+        child(:source, %Source{storage: storage, master_playlist_uri: uri})
       ]
 
       {[spec: structure], opts}
@@ -47,7 +47,7 @@ defmodule Membrane.HLS.SourceTest do
       options = [
         module: Pipeline,
         custom_args: %{
-          reader: %Support.Reader{},
+          storage: %HLS.Storage.File{},
           master_playlist_uri: @master_playlist_uri,
           stream_selector: fn _ -> false end
         }
@@ -66,7 +66,7 @@ defmodule Membrane.HLS.SourceTest do
       options = [
         module: Pipeline,
         custom_args: %{
-          reader: %Support.Reader{},
+          storage: %HLS.Storage.File{},
           master_playlist_uri: @master_playlist_uri,
           stream_selector: fn stream ->
             stream.uri == target_stream_uri
@@ -84,7 +84,7 @@ defmodule Membrane.HLS.SourceTest do
       })
 
       # Asserting that each chunks in the selected playlist is seen by the sink
-      %URI{path: master_playlist_path} = @master_playlist_uri
+      master_playlist_path = to_path(@master_playlist_uri)
       base_dir = Path.join([Path.dirname(master_playlist_path), stream_name, "00000"])
 
       base_dir
@@ -96,5 +96,11 @@ defmodule Membrane.HLS.SourceTest do
       assert_end_of_stream(pipeline, :sink)
       Membrane.Testing.Pipeline.terminate(pipeline)
     end
+  end
+
+  defp to_path(%URI{scheme: "file"} = uri) do
+    [uri.host, uri.path]
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+    |> Path.join()
   end
 end

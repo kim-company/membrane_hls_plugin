@@ -4,6 +4,7 @@ defmodule Membrane.HLS.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      {DynamicSupervisor, name: Membrane.HLS.TrackerSupervisor},
       {Task.Supervisor, name: Membrane.HLS.TaskSupervisor}
     ]
 

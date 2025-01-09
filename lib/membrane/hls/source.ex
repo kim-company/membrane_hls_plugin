@@ -1,13 +1,14 @@
 defmodule Membrane.HLS.Source do
   use Membrane.Source
 
-  alias Membrane.HLS.Reader
-  alias HLS.Playlist.Media.Tracker
+  alias HLS.Tracker
   alias HLS.Playlist
   alias HLS.Playlist.Master
+  alias HLS.Storage
   alias Membrane.Buffer
   alias Membrane.HLS.Format
   alias Membrane.HLS.TaskSupervisor
+  alias Membrane.HLS.TrackerSupervisor
 
   @master_check_retry_interval_ms 1_000
   require Membrane.Logger
@@ -21,9 +22,9 @@ defmodule Membrane.HLS.Source do
   )
 
   def_options(
-    reader: [
-      spec: Reader.t(),
-      description: "HLS.Reader implementation used to obtain playlist's contents"
+    storage: [
+      spec: Storage.t(),
+      description: "HLS.Storage implementation used to obtain playlist's contents"
     ],
     master_playlist_uri: [
       spec: URI.t(),
@@ -35,36 +36,52 @@ defmodule Membrane.HLS.Source do
   def handle_init(_ctx, options) do
     {[],
      %{
-       reader: options.reader,
+       storage: options.storage,
        master_playlist_uri: options.master_playlist_uri,
        pad_to_tracker: %{},
-       ref_to_pad: %{}
+       ref_to_pad: %{},
+       monitor_to_pad: %{}
      }}
   end
 
   @impl true
   def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _, state) do
-    {:ok, pid} =
-      Tracker.start_link(fn uri ->
-        {:ok, data} = Reader.read(state.reader, uri)
-        data
-      end)
+    uri = Playlist.build_absolute_uri(state.master_playlist_uri, extract_uri(rendition))
+    ref = make_ref()
 
-    target = Playlist.build_absolute_uri(state.master_playlist_uri, extract_uri(rendition))
-    ref = Tracker.follow(pid, target)
+    {:ok, pid} =
+      DynamicSupervisor.start_child(
+        TrackerSupervisor,
+        {Tracker,
+         [
+           media_playlist_uri: uri,
+           storage: state.storage,
+           ref: ref,
+           owner: self()
+         ]}
+      )
+
+    monitor_ref = Process.monitor(pid)
 
     config = %{
-      media_uri: target,
+      media_uri: uri,
+      monitor_ref: monitor_ref,
       tracking: ref,
       tracker: pid,
-      ready: Q.new("hls-ready-#{rendition.uri.path}"),
-      pending: Q.new("hls-pending-#{rendition.uri.path}"),
+      ready: :queue.new(),
+      pending: :queue.new(),
       download: nil,
       closed: false
     }
 
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, config)}
-    state = %{state | ref_to_pad: Map.put(state.ref_to_pad, ref, pad)}
+    state =
+      state
+      |> put_in([:pad_to_tracker, pad], config)
+      # When the tracker sends us messages it forwards ref. We use this mapping
+      # to retrieve the tracker.
+      |> put_in([:ref_to_pad, ref], pad)
+      # In case the tracker exits.
+      |> put_in([:monitor_to_pad, monitor_ref], pad)
 
     {[
        {:stream_format,
@@ -79,20 +96,43 @@ defmodule Membrane.HLS.Source do
   end
 
   @impl true
-  def handle_demand(pad, size, :buffers, _ctx, state) do
-    tracker = Map.fetch!(state.pad_to_tracker, pad)
-    {actions, ready} = Q.take(tracker.ready, size)
+  def handle_demand(pad, _size, :buffers, _ctx, state) do
+    tracker = get_in(state, [:pad_to_tracker, pad])
 
-    actions =
-      if tracker.closed and Q.empty?(ready) and Q.empty?(tracker.pending) and
-           is_nil(tracker.download) do
-        actions ++ [{:end_of_stream, pad}]
-      else
-        actions
+    # First take one ready if available.
+    {actions, tracker} =
+      get_and_update_in(tracker, [:ready], fn q ->
+        case :queue.out(q) do
+          {{:value, action}, q} -> {[action], q}
+          {:empty, q} -> {[], q}
+        end
+      end)
+
+    {actions, tracker} =
+      cond do
+        not is_nil(tracker.download) ->
+          # We're already downloading another segment. We can chill out.
+          {actions, tracker}
+
+        not :queue.is_empty(tracker.pending) ->
+          # The pending queue is not empty. Schedule a download.
+          {actions, schedule_download!(tracker, state.storage)}
+
+        not :queue.is_empty(tracker.ready) ->
+          # We have other ready segments.
+          {actions ++ [{:redemand, pad}], tracker}
+
+        tracker.closed ->
+          # Everything is out and the tracker is not going to provide
+          # more segments. Time to close.
+          {actions ++ [{:end_of_stream, pad}], tracker}
+
+        true ->
+          # We're waiting for more segments from the tracker.
+          {actions, tracker}
       end
 
-    tracker = %{tracker | ready: ready}
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
+    state = put_in(state, [:pad_to_tracker, pad], tracker)
 
     {actions, state}
   end
@@ -101,9 +141,9 @@ defmodule Membrane.HLS.Source do
   def handle_info(
         :check_master_playlist,
         _ctx,
-        state = %{reader: reader, master_playlist_uri: uri}
+        state = %{storage: storage, master_playlist_uri: uri}
       ) do
-    case Reader.read(reader, uri) do
+    case Storage.get(storage, uri) do
       {:ok, data} ->
         playlist = Playlist.unmarshal(data, %Master{uri: uri})
         {[{:notify_parent, {:hls_master_playlist, playlist}}], state}
@@ -121,63 +161,55 @@ defmodule Membrane.HLS.Source do
   end
 
   def handle_info({:segment, ref, segment}, _ctx, state) do
-    Membrane.Logger.debug("HLS segment received on #{inspect(ref)}: #{inspect(segment)}")
-
+    Membrane.Logger.debug("HLS segment received on #{inspect(ref)}: #{to_string(segment.uri)}")
     pad = Map.fetch!(state.ref_to_pad, ref)
-    tracker = Map.fetch!(state.pad_to_tracker, pad)
 
-    tracker =
-      tracker
-      |> Map.update!(:pending, &Q.push(&1, segment))
-      |> start_download(state.reader)
+    # We're not downloading the segment, we're only putting it into the pending
+    # queue. Download will be triggered when the segment is demanded. This allows
+    # to download a VOD playlist in a controlled fashion.
+    state =
+      update_in(state, [:pad_to_tracker, pad, :pending], fn q ->
+        :queue.in(segment, q)
+      end)
 
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-    {[], state}
+    {[{:redemand, pad}], state}
   end
 
-  def handle_info({task_ref, result}, _ctx, state) when is_reference(task_ref) do
+  def handle_info({task_ref, {:segment, {:data, binary}}}, _ctx, state) do
     # The task succeed so we can cancel the monitoring and discard the DOWN message
     Process.demonitor(task_ref, [:flush])
+    pad = find_pad_by_download_ref(task_ref, state)
+    tracker = get_in(state, [:pad_to_tracker, pad])
+    action = {:buffer, {pad, %Buffer{payload: binary, metadata: tracker.download.segment}}}
 
-    {pad, tracker} = tracker_by_task_ref!(state.pad_to_tracker, task_ref)
-    segment = tracker.download.segment
+    state =
+      state
+      |> update_in([:pad_to_tracker, pad, :ready], fn q -> :queue.in(action, q) end)
+      |> put_in([:pad_to_tracker, pad, :download], nil)
 
-    tracker =
-      case result do
-        {:ok, data} ->
-          action = {:buffer, {pad, %Buffer{payload: data, metadata: segment}}}
-          ready = Q.push(tracker.ready, action)
-          %{tracker | ready: ready, download: nil}
-
-        {:error, message} ->
-          Membrane.Logger.warning(
-            "HLS could not get segment #{inspect(segment.uri)}: #{inspect(message)}"
-          )
-
-          %{tracker | download: nil}
-      end
-
-    tracker = start_download(tracker, state.reader)
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
     {[{:redemand, pad}], state}
   end
 
   def handle_info({:DOWN, task_ref, _, _, reason}, _ctx, state) do
-    {pad, tracker} = tracker_by_task_ref!(state.pad_to_tracker, task_ref)
-    segment = tracker.download.segment
+    # This could either be a download message or a tracker.
+    cond do
+      Map.has_key?(state.monitor_to_pad, task_ref) ->
+        pad = get_in(state, [:monitor_to_pad, task_ref])
 
-    Membrane.Logger.warning(
-      "HLS could not get segment #{inspect(segment.uri)}: #{inspect(reason)}"
-    )
+        raise RuntimeError,
+              "Tracker for pad #{inspect(pad)} exited with reason: #{inspect(reason)}"
 
-    tracker =
-      tracker
-      |> Map.replace!(:download, nil)
-      |> start_download(state.reader)
+      true ->
+        # In this case, is is a download task.
+        pad = find_pad_by_download_ref(task_ref, state)
 
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
+        Membrane.Logger.warning(
+          "HLS could not get next segment for pad #{inspect(pad)}: #{inspect(reason)}"
+        )
 
-    {[{:redemand, pad}], state}
+        state = put_in(state, [:pad_to_tracker, pad, :download], nil)
+        {[{:redemand, pad}], state}
+    end
   end
 
   def handle_info({:start_of_track, _ref, _next_sequence}, _ctx, state) do
@@ -185,57 +217,48 @@ defmodule Membrane.HLS.Source do
   end
 
   def handle_info({:end_of_track, ref}, _ctx, state) do
+    # Note that the tracker process is going to exit at this point.
     Membrane.Logger.debug("HLS end_of_track received on #{inspect(ref)}")
 
     pad = Map.fetch!(state.ref_to_pad, ref)
-    tracker = Map.fetch!(state.pad_to_tracker, pad)
-    Tracker.stop(tracker.tracker)
-    tracker = %{tracker | closed: true}
+    monitor_ref = get_in(state, [:pad_to_tracker, pad, :monitor_ref])
+    # Avoid receiving the exit message, even though we should not receive
+    # it anyway in case it goes down with :normal reason.
+    Process.demonitor(monitor_ref, [:flush])
 
-    state = %{state | pad_to_tracker: Map.put(state.pad_to_tracker, pad, tracker)}
-
+    state = put_in(state, [:pad_to_tracker, pad, :closed], true)
     {[{:redemand, pad}], state}
   end
 
-  @impl true
-  def handle_terminate_request(_ctx, state) do
-    Enum.each(state.pad_to_tracker, fn {_, %{tracker: pid, closed: closed}} ->
-      unless closed, do: Tracker.stop(pid)
-    end)
+  defp find_pad_by_download_ref(task_ref, state) do
+    {pad, _tracker} =
+      Enum.find(
+        state.pad_to_tracker,
+        {nil, nil},
+        fn {_pad, tracker} ->
+          tracker.download != nil and tracker.download.task_ref == task_ref
+        end
+      )
 
-    {[terminate: :normal], %{state | pad_to_tracker: %{}, ref_to_pad: %{}}}
+    pad
   end
 
-  defp tracker_by_task_ref!(pad_to_tracker, task_ref) do
-    tracker =
-      Enum.find(pad_to_tracker, fn {_pad, tracker} ->
-        tracker.download != nil and tracker.download.task_ref == task_ref
+  defp schedule_download!(%{download: nil, media_uri: media_uri} = tracker, storage) do
+    {{:value, segment}, queue} = :queue.out(tracker.pending)
+
+    task =
+      Task.Supervisor.async_nolink(TaskSupervisor, fn ->
+        uri = Playlist.build_absolute_uri(media_uri, segment.uri)
+        Membrane.Logger.debug("Getting segment: #{to_string(uri)}")
+
+        case Storage.get(storage, uri) do
+          {:ok, data} -> {:segment, {:data, data}}
+          {:error, reason} -> raise RuntimeError, reason
+        end
       end)
 
-    tracker || raise "tracker with task reference #{inspect(task_ref)} not found"
+    %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}
   end
-
-  defp start_download(%{download: nil, media_uri: media_uri} = tracker, reader) do
-    case Q.pop(tracker.pending) do
-      {{:value, segment}, queue} ->
-        Membrane.Logger.debug("Starting download of segment: #{inspect(segment)}")
-
-        task =
-          Task.Supervisor.async_nolink(TaskSupervisor, fn ->
-            Reader.read(
-              reader,
-              Playlist.build_absolute_uri(media_uri, segment.uri)
-            )
-          end)
-
-        %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}
-
-      {:empty, _q} ->
-        tracker
-    end
-  end
-
-  defp start_download(tracker, _reader), do: tracker
 
   defp extract_uri(%HLS.AlternativeRendition{uri: uri}), do: uri
   defp extract_uri(%HLS.VariantStream{uri: uri}), do: uri
