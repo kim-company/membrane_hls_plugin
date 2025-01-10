@@ -44,10 +44,7 @@ defmodule Membrane.Demo.HLSIn do
   @impl true
   def handle_init(_ctx, opts) do
     structure =
-      child(:source, %Membrane.HLS.Source{
-        reader: %My.Reader{},
-        master_playlist_uri: "<URL>"
-      })
+      child(:source, %Membrane.HLS.Source{reader: %My.Reader{}, master_playlist_uri: "<URL>"})
 
     {[spec: structure], opts}
   end
@@ -104,10 +101,7 @@ defmodule Membrane.Demo.HLSIn do
       }),
       get_child(:demuxer)
       |> via_out(Pad.ref(:output, {:stream_id, audio_track_id}))
-      |> child(:audio_parser, %Membrane.AAC.Parser{
-        out_encapsulation: :none,
-        output_config: :esds
-      })
+      |> child(:audio_parser, %Membrane.AAC.Parser{out_encapsulation: :none, output_config: :esds})
       |> via_in(Pad.ref(:input, "audio_128k"),
         options: [
           encoding: :AAC,
@@ -154,23 +148,16 @@ defmodule Membrane.Demo.HLSIn do
   end
 
   @impl true
-  def handle_child_notification(_msg, _child, _ctx, state) do
-    {[], state}
-  end
+  def handle_child_notification(_msg, _child, _ctx, state), do: {[], state}
 
   @impl true
-  def handle_element_end_of_stream(:sink, :input, _ctx, state) do
-    {[terminate: :normal], state}
-  end
+  def handle_element_end_of_stream(:sink, :input, _ctx, state), do: {[terminate: :normal], state}
 
   @impl true
-  def handle_element_end_of_stream(_element, _pad, _ctx, state) do
-    {[], state}
-  end
+  def handle_element_end_of_stream(_element, _pad, _ctx, state), do: {[], state}
 end
 
 {:ok, _supervisor, pipeline_pid} = Membrane.Pipeline.start_link(Membrane.Demo.HLSIn, [])
-IO.inspect(pipeline_pid, label: "pipeline_pid")
 ref = Process.monitor(pipeline_pid)
 
 :ok =
