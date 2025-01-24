@@ -23,12 +23,12 @@ defmodule Membrane.HLS.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:kim_hls, "~> 2.1"},
       {:membrane_core, "~> 1.0"},
       {:membrane_file_plugin, "~> 0.17"},
       {:membrane_mp4_plugin, "~> 0.35"},
       {:membrane_aac_plugin, "~> 0.18"},
       {:membrane_h26x_plugin, "~> 0.10"},
-      {:kim_hls, "~> 2.0"},
       {:membrane_text_format, github: "kim-company/membrane_text_format"},
       {:membrane_webvtt_plugin, github: "kim-company/membrane_webvtt_plugin"},
       {:membrane_flv_plugin, "~> 0.13", only: :test}
