@@ -29,8 +29,8 @@ defmodule Membrane.HLS.MixProject do
       {:membrane_mp4_plugin, "~> 0.35"},
       {:membrane_aac_plugin, "~> 0.18"},
       {:membrane_h26x_plugin, "~> 0.10"},
-      {:membrane_text_format, github: "kim-company/membrane_text_format"},
-      {:membrane_webvtt_plugin, github: "kim-company/membrane_webvtt_plugin"},
+      {:membrane_text_format, "~> 1.0"},
+      {:membrane_webvtt_plugin, "~> 1.0"},
       {:membrane_flv_plugin, "~> 0.13", only: :test}
     ]
   end

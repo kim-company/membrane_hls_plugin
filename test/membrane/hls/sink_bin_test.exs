@@ -55,7 +55,7 @@ defmodule Membrane.HLS.SinkBinTest do
 
       # Subtitles
       child(:text_source, %Membrane.Testing.Source{
-        stream_format: %Membrane.Text{locale: "de"},
+        stream_format: %Membrane.Text{},
         output: [
           %Membrane.Buffer{
             payload: "",
@@ -88,13 +88,13 @@ defmodule Membrane.HLS.SinkBinTest do
         options: [
           encoding: :TEXT,
           segment_duration: Membrane.Time.seconds(6),
-          build_stream: fn %Membrane.Text{} = format ->
+          build_stream: fn %Membrane.Text{} ->
             %HLS.AlternativeRendition{
               uri: nil,
               name: "Subtitles (EN)",
               type: :subtitles,
               group_id: "subtitles",
-              language: format.locale,
+              language: "en",
               default: true,
               autoselect: true
             }
