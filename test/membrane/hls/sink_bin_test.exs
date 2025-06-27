@@ -4,17 +4,10 @@ defmodule Membrane.HLS.SinkBinTest do
 
   import Membrane.Testing.Assertions
 
-  @tag :tmp_dir
-  test "on a new stream", %{tmp_dir: tmp_dir} do
-    {:ok, packager} =
-      HLS.Packager.start_link(
-        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
-        storage: HLS.Storage.File.new(),
-        resume_finished_tracks: true,
-        restore_pending_segments: false
-      )
+  @avsync "test/fixtures/avsync.flv"
 
-    spec = [
+  defp build_base_spec(packager) do
+    [
       child(:sink, %Membrane.HLS.SinkBin{
         packager: packager,
         target_segment_duration: Membrane.Time.seconds(7)
@@ -22,11 +15,55 @@ defmodule Membrane.HLS.SinkBinTest do
 
       # Source
       child(:source, %Membrane.File.Source{
-        location: "test/fixtures/avsync.flv"
+        location: @avsync
       })
-      |> child(:demuxer, Membrane.FLV.Demuxer),
+      |> child(:demuxer, Membrane.FLV.Demuxer)
+    ]
+  end
 
-      # Audio
+  defp make_cue_buffer(from, to, text) do
+    %Membrane.Buffer{
+      payload: text,
+      pts: Membrane.Time.milliseconds(from),
+      metadata: %{to: Membrane.Time.milliseconds(to)}
+    }
+  end
+
+  defp build_subtitles_spec() do
+    [
+      child(:text_source, %Membrane.Testing.Source{
+        stream_format: %Membrane.Text{},
+        output: [
+          make_cue_buffer(0, 99, ""),
+          make_cue_buffer(100, 6_000, "Subtitle from start to 6s"),
+          make_cue_buffer(6_001, 12_000, ""),
+          make_cue_buffer(12_001, 16_000, "Subtitle from 12s to 16s"),
+          make_cue_buffer(16_001, 30_000, "")
+        ]
+      })
+      |> via_in(Pad.ref(:input, "subtitles"),
+        options: [
+          encoding: :TEXT,
+          segment_duration: Membrane.Time.seconds(6),
+          build_stream: fn %Membrane.Text{} ->
+            %HLS.AlternativeRendition{
+              uri: nil,
+              name: "Subtitles (EN)",
+              type: :subtitles,
+              group_id: "subtitles",
+              language: "en",
+              default: true,
+              autoselect: true
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+  end
+
+  defp build_cmaf_spec() do
+    [
       get_child(:demuxer)
       |> via_out(Pad.ref(:audio, 0))
       |> child(:aac_parser, %Membrane.AAC.Parser{
@@ -52,59 +89,6 @@ defmodule Membrane.HLS.SinkBinTest do
         ]
       )
       |> get_child(:sink),
-
-      # Subtitles
-      child(:text_source, %Membrane.Testing.Source{
-        stream_format: %Membrane.Text{},
-        output: [
-          %Membrane.Buffer{
-            payload: "",
-            pts: 0,
-            metadata: %{to: Membrane.Time.milliseconds(99)}
-          },
-          %Membrane.Buffer{
-            payload: "Subtitle from start to 6s",
-            pts: Membrane.Time.milliseconds(100),
-            metadata: %{to: Membrane.Time.seconds(6) - Membrane.Time.millisecond()}
-          },
-          %Membrane.Buffer{
-            payload: "",
-            pts: Membrane.Time.seconds(6),
-            metadata: %{to: Membrane.Time.seconds(12) - Membrane.Time.millisecond()}
-          },
-          %Membrane.Buffer{
-            payload: "Subtitle from 12s to 16s",
-            pts: Membrane.Time.seconds(12),
-            metadata: %{to: Membrane.Time.seconds(16) - Membrane.Time.millisecond()}
-          },
-          %Membrane.Buffer{
-            payload: "",
-            pts: Membrane.Time.seconds(16),
-            metadata: %{to: Membrane.Time.seconds(30) - Membrane.Time.millisecond()}
-          }
-        ]
-      })
-      |> via_in(Pad.ref(:input, "subtitles"),
-        options: [
-          encoding: :TEXT,
-          segment_duration: Membrane.Time.seconds(6),
-          build_stream: fn %Membrane.Text{} ->
-            %HLS.AlternativeRendition{
-              uri: nil,
-              name: "Subtitles (EN)",
-              type: :subtitles,
-              group_id: "subtitles",
-              language: "en",
-              default: true,
-              autoselect: true
-            }
-          end
-        ]
-      )
-      |> get_child(:sink),
-
-      # Video
-      # Audio
       get_child(:demuxer)
       |> via_out(Pad.ref(:video, 0))
       |> child(:h264_parser, %Membrane.H264.Parser{
@@ -130,6 +114,23 @@ defmodule Membrane.HLS.SinkBinTest do
       )
       |> get_child(:sink)
     ]
+  end
+
+  @tag :tmp_dir
+  test "on a new stream, CMAF", %{tmp_dir: tmp_dir} do
+    {:ok, packager} =
+      HLS.Packager.start_link(
+        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
+        storage: HLS.Storage.File.new(),
+        resume_finished_tracks: true,
+        restore_pending_segments: false
+      )
+
+    spec =
+      packager
+      |> build_base_spec()
+      |> Enum.concat(build_subtitles_spec())
+      |> Enum.concat(build_cmaf_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)

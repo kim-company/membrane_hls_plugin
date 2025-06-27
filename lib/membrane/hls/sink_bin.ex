@@ -44,6 +44,13 @@ defmodule Membrane.HLS.SinkBin do
     accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text),
     availability: :on_request,
     options: [
+      packaging: [
+        spec: :CMAF | :MPEGTS,
+        default: :CMAF,
+        description: """
+        How A/V tracks are packaged.
+        """
+      ],
       encoding: [
         spec: :AAC | :H264 | :TEXT,
         description: """
@@ -51,9 +58,8 @@ defmodule Membrane.HLS.SinkBin do
         """
       ],
       build_stream: [
-        spec:
-          (Membrane.CMAF.Track.t() ->
-             HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
+        spec: (Membrane.CMAF.Track.t() ->
+                 HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
         description: "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`."
       ],
       segment_duration: [
