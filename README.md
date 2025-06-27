@@ -1,4 +1,6 @@
 # Membrane HLS Plugin
+![Hex.pm Version](https://img.shields.io/hexpm/v/membrane_hls_plugin)
+
 Adaptive live streaming plugin (HLS) for the Membrane Framework, used in production.
 
 ## Features
