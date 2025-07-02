@@ -196,7 +196,7 @@ defmodule Membrane.HLS.SinkBinTest do
   end
 
   @tag :tmp_dir
-  test "on a new stream, MPEGTS", %{tmp_dir: tmp_dir} do
+  test "on a new stream, MPEG-TS", %{tmp_dir: tmp_dir} do
     {:ok, packager} =
       HLS.Packager.start_link(
         manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),

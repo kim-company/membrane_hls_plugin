@@ -143,7 +143,7 @@ defmodule Membrane.HLS.SinkBin do
       |> child({:aggregator, track_id}, %Membrane.MPEG.TS.Aggregator{
         min_duration: pad_opts.segment_duration
       })
-      |> child({:sink, track_id}, %Membrane.HLS.MPEGSink{
+      |> child({:sink, track_id}, %Membrane.HLS.TSSink{
         packager: state.opts.packager,
         track_id: track_id,
         target_segment_duration: state.opts.target_segment_duration,

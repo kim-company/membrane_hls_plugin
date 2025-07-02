@@ -1,4 +1,4 @@
-defmodule Membrane.HLS.MPEGSink do
+defmodule Membrane.HLS.TSSink do
   use Membrane.Sink
   alias HLS.Packager
 
