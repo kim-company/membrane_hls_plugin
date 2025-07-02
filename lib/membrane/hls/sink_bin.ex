@@ -107,6 +107,29 @@ defmodule Membrane.HLS.SinkBin do
 
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
+        %{pad_options: %{encoding: :AAC, container: :PACKED_AAC} = pad_opts},
+        state
+      ) do
+    spec =
+      bin_input(pad)
+      |> child({:parser, track_id}, %Membrane.AAC.Parser{
+        out_encapsulation: :ADTS
+      })
+      |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
+        min_duration: pad_opts.segment_duration
+      })
+      |> child({:sink, track_id}, %Membrane.HLS.PackedAACSink{
+        packager: state.opts.packager,
+        track_id: track_id,
+        target_segment_duration: state.opts.target_segment_duration,
+        build_stream: pad_opts.build_stream
+      })
+
+    {[spec: spec], state}
+  end
+
+  def handle_pad_added(
+        Pad.ref(:input, track_id) = pad,
         %{pad_options: %{encoding: :AAC} = pad_opts},
         state
       ) do

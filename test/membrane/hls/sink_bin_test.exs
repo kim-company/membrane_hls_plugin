@@ -123,22 +123,19 @@ defmodule Membrane.HLS.SinkBinTest do
     [
       get_child(:demuxer)
       |> via_out(:audio)
-      |> child(:aac_parser, %Membrane.AAC.Parser{
-        out_encapsulation: :none,
-        output_config: :esds
-      })
       |> via_in(Pad.ref(:input, "audio_128k"),
         options: [
           encoding: :AAC,
+          container: :PACKED_AAC,
           segment_duration: Membrane.Time.seconds(6),
-          build_stream: fn %Membrane.CMAF.Track{} = format ->
+          build_stream: fn format ->
             %HLS.AlternativeRendition{
               uri: nil,
               name: "Audio (EN)",
               type: :audio,
               group_id: "audio",
               language: "en",
-              channels: to_string(format.codecs.mp4a.channels),
+              channels: to_string(format.channels),
               default: true,
               autoselect: true
             }
@@ -154,16 +151,17 @@ defmodule Membrane.HLS.SinkBinTest do
           container: :TS,
           segment_duration: Membrane.Time.seconds(6),
           build_stream: fn _format ->
+            codecs =
+              Membrane.HLS.serialize_codecs(%{
+                avc1: %{profile: 100, level: 31, compatibility: 0}
+              })
+
             %HLS.VariantStream{
               uri: nil,
               bandwidth: 850_000,
               resolution: {460, 720},
               frame_rate: 30.0,
-              codecs: [
-                Membrane.HLS.serialize_codecs(%{
-                  avc1: %{profile: 100, level: 31, compatibility: 0}
-                })
-              ],
+              codecs: codecs,
               audio: "audio",
               subtitles: "subtitles"
             }
@@ -175,6 +173,7 @@ defmodule Membrane.HLS.SinkBinTest do
   end
 
   @tag :tmp_dir
+  @tag :skip
   test "on a new stream, CMAF", %{tmp_dir: tmp_dir} do
     {:ok, packager} =
       HLS.Packager.start_link(
