@@ -40,12 +40,14 @@ defmodule Membrane.HLS.SinkBin do
     ]
   )
 
+  @type track :: Membrane.CMAF.Track.t() | map()
+
   def_input_pad(:input,
-    accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text),
+    accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text, Membrane.RemoteStream),
     availability: :on_request,
     options: [
-      packaging: [
-        spec: :CMAF | :MPEGTS,
+      container: [
+        spec: :CMAF | :TS | :PACKED_AAC,
         default: :CMAF,
         description: """
         How A/V tracks are packaged.
@@ -58,8 +60,7 @@ defmodule Membrane.HLS.SinkBin do
         """
       ],
       build_stream: [
-        spec: (Membrane.CMAF.Track.t() ->
-                 HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
+        spec: (track() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
         description: "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`."
       ],
       segment_duration: [
@@ -104,7 +105,6 @@ defmodule Membrane.HLS.SinkBin do
         "New pads can be added to #{inspect(__MODULE__)} only before playback transition to :playing"
       )
 
-  @impl true
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
         %{pad_options: %{encoding: :AAC} = pad_opts},
@@ -127,7 +127,32 @@ defmodule Membrane.HLS.SinkBin do
     {[spec: spec], state}
   end
 
-  @impl true
+  def handle_pad_added(
+        Pad.ref(:input, track_id) = pad,
+        %{pad_options: %{encoding: :H264, container: :TS} = pad_opts},
+        state
+      ) do
+    spec =
+      bin_input(pad)
+      |> child({:parser, track_id}, %Membrane.NALU.ParserBin{
+        assume_aligned: true,
+        alignment: :aud
+      })
+      |> via_in(Pad.ref(:input), options: [stream_type: :H264])
+      |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
+      |> child({:aggregator, track_id}, %Membrane.MPEG.TS.Aggregator{
+        min_duration: pad_opts.segment_duration
+      })
+      |> child({:sink, track_id}, %Membrane.HLS.MPEGSink{
+        packager: state.opts.packager,
+        track_id: track_id,
+        target_segment_duration: state.opts.target_segment_duration,
+        build_stream: pad_opts.build_stream
+      })
+
+    {[spec: spec], state}
+  end
+
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
         %{pad_options: %{encoding: :H264} = pad_opts},
