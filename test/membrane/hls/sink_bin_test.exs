@@ -173,7 +173,6 @@ defmodule Membrane.HLS.SinkBinTest do
   end
 
   @tag :tmp_dir
-  @tag :skip
   test "on a new stream, CMAF", %{tmp_dir: tmp_dir} do
     {:ok, packager} =
       HLS.Packager.start_link(
