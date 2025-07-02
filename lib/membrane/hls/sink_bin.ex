@@ -112,9 +112,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> child({:parser, track_id}, %Membrane.AAC.Parser{
-        out_encapsulation: :ADTS
-      })
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
         min_duration: pad_opts.segment_duration
       })
@@ -157,10 +154,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> child({:parser, track_id}, %Membrane.NALU.ParserBin{
-        assume_aligned: true,
-        alignment: :aud
-      })
       |> via_in(Pad.ref(:input), options: [stream_type: :H264])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.MPEG.TS.Aggregator{

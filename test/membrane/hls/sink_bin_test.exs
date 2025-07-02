@@ -123,6 +123,9 @@ defmodule Membrane.HLS.SinkBinTest do
     [
       get_child(:demuxer)
       |> via_out(:audio)
+      |> child(:aac_parser, %Membrane.AAC.Parser{
+        out_encapsulation: :ADTS
+      })
       |> via_in(Pad.ref(:input, "audio_128k"),
         options: [
           encoding: :AAC,
@@ -145,6 +148,10 @@ defmodule Membrane.HLS.SinkBinTest do
       |> get_child(:sink),
       get_child(:demuxer)
       |> via_out(:video)
+      |> child(:h264_parser, %Membrane.NALU.ParserBin{
+        assume_aligned: true,
+        alignment: :aud
+      })
       |> via_in(Pad.ref(:input, "video_460x720"),
         options: [
           encoding: :H264,
