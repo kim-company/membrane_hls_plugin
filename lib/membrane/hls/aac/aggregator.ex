@@ -106,8 +106,8 @@ defmodule Membrane.HLS.AAC.Aggregator do
 
   defp encode_id3v2_priv_timestamp(pts) do
     payload =
-      pts
-      |> div(90_000)
+      (pts / 1.0e9 * 90_000)
+      |> floor()
       |> rem(2 ** 33 - 1)
       |> then(fn ts ->
         <<ts::unsigned-big-integer-size(64)>>
