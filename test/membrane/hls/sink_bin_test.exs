@@ -17,7 +17,7 @@ defmodule Membrane.HLS.SinkBinTest do
       child(:source, %Membrane.File.Source{
         location: @avsync
       })
-      |> child(:demuxer, Support.Bin)
+      |> child(:demuxer, Membrane.MPEG.TS.AVDemuxer)
     ]
   end
 
