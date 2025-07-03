@@ -2,11 +2,11 @@ defmodule Membrane.HLS.Shifter do
   use Membrane.Filter
 
   def_input_pad(:input,
-    accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text)
+    accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text, Membrane.RemoteStream)
   )
 
   def_output_pad(:output,
-    accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text)
+    accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text, Membrane.RemoteStream)
   )
 
   def_options(
