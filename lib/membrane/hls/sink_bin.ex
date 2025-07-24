@@ -59,6 +59,15 @@ defmodule Membrane.HLS.SinkBin do
         Encoding type determining which parser will be used for the given stream.
         """
       ],
+      omit_subtitle_repetition: [
+        spec: boolean(),
+        default: false,
+        description: """
+        When writing subtitle playlists, subtitles that span over multiple segments are repeated
+        in both segments. When this flag is turned on, subtitles appear only in the segment in
+        which they start.
+        """
+      ],
       build_stream: [
         spec: (track() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
         description: "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`."
@@ -201,6 +210,7 @@ defmodule Membrane.HLS.SinkBin do
       })
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: pad_opts.segment_duration,
+        omit_repetition: pad_opts.omit_subtitle_repetition,
         headers: [
           %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"}
         ]

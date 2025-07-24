@@ -35,8 +35,8 @@ defmodule Membrane.HLS.SinkBinTest do
         stream_format: %Membrane.Text{},
         output: [
           make_cue_buffer(0, 99, ""),
-          make_cue_buffer(100, 6_000, "Subtitle from start to 6s"),
-          make_cue_buffer(6_001, 12_000, ""),
+          make_cue_buffer(100, 8_000, "Subtitle from start to 6s"),
+          make_cue_buffer(8_001, 12_000, ""),
           make_cue_buffer(12_001, 16_000, "Subtitle from 12s to 16s"),
           make_cue_buffer(16_001, 30_000, "")
         ]
@@ -45,6 +45,7 @@ defmodule Membrane.HLS.SinkBinTest do
         options: [
           encoding: :TEXT,
           segment_duration: Membrane.Time.seconds(6),
+          omit_subtitle_repetition: false,
           build_stream: fn %Membrane.Text{} ->
             %HLS.AlternativeRendition{
               uri: nil,
