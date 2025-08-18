@@ -211,6 +211,7 @@ defmodule Membrane.HLS.SinkBin do
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: pad_opts.segment_duration,
         omit_repetition: pad_opts.omit_subtitle_repetition,
+        resume: true,
         headers: [
           %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"}
         ]
