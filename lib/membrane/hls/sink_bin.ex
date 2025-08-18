@@ -130,7 +130,7 @@ defmodule Membrane.HLS.SinkBin do
       bin_input(pad)
       |> maybe_add_shifter(track_id, state)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
-        min_duration: pad_opts.segment_duration
+        target_duration: pad_opts.segment_duration
       })
       |> child({:sink, track_id}, %Membrane.HLS.PackedAACSink{
         packager: state.opts.packager,
@@ -340,7 +340,7 @@ defmodule Membrane.HLS.SinkBin do
     %{state | live_state: live_state}
   end
 
-  defp maybe_add_shifter(spec, _track_id, %{live_playlist?: false}), do: spec
+  defp maybe_add_shifter(spec, _track_id, %{live_playlist?: true}), do: spec
 
   defp maybe_add_shifter(spec, track_id, state) do
     child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{

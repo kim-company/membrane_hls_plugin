@@ -10,17 +10,17 @@ defmodule Membrane.HLS.AAC.Aggregator do
   )
 
   def_options(
-    min_duration: [
+    target_duration: [
       spec: Membrane.Time.t(),
       description: """
-      When min duration worth of audio data is accumulated, a segment is emitted.
+      Segments will converge to this duration.
       """
     ]
   )
 
   @impl true
   def handle_init(_ctx, opts) do
-    {[], %{min_duration: opts.min_duration, acc: [], pts: nil}}
+    {[], %{target_duration: opts.target_duration, acc: [], pts: nil, accumulated_offset: 0}}
   end
 
   @impl true
@@ -41,10 +41,11 @@ defmodule Membrane.HLS.AAC.Aggregator do
         {[], state}
 
       pts ->
-        duration = buffer.pts - pts
+        actual_duration = buffer.pts - pts
+        duration = state.accumulated_offset + actual_duration
 
-        if duration >= state.min_duration do
-          {out_buffer, state} = finalize_segment(state, duration)
+        if duration >= state.target_duration do
+          {out_buffer, state} = finalize_segment(state, actual_duration)
           state = init_segment(state, buffer)
           {[buffer: {:output, out_buffer}], state}
         else
@@ -89,10 +90,13 @@ defmodule Membrane.HLS.AAC.Aggregator do
       metadata: metadata
     }
 
+    offset = duration - state.target_duration
+
     state =
       state
       |> put_in([:acc], [])
       |> put_in([:pts], nil)
+      |> update_in([:accumulated_offset], fn x -> x + offset end)
 
     {buffer, state}
   end

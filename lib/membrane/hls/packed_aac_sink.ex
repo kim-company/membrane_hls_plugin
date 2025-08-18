@@ -1,6 +1,7 @@
 defmodule Membrane.HLS.PackedAACSink do
   use Membrane.Sink
   alias HLS.Packager
+  require Membrane.Logger
 
   def_input_pad(:input,
     accepted_format: Membrane.AAC
