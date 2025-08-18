@@ -1,6 +1,6 @@
 defmodule Membrane.HLS.SinkBin do
   @moduledoc """
-  Bin responsible for receiving audio and video streams, performing payloading and CMAF
+  Bin responsible for receiving audio and video streams, performing payloading and CMAF/TS/AAC
   muxing to eventually store them using provided storage configuration.
   """
   use Membrane.Bin
@@ -12,7 +12,13 @@ defmodule Membrane.HLS.SinkBin do
     packager: [
       spec: pid(),
       description: """
-      PID of a `HLS.Packager`.
+      PID of a `HLS.Packager`. If the packager is configured with max_segments,
+      the playlist will be offered with sliding windows. In case of restarts, a
+      discontinuity indicator is added.
+
+      In the other case, when the playlist does not have sliding windows, the
+      sink will shift the timing of each segment in case of restarts to ensure
+      PTS strictly increasing monotonicity.
       """
     ],
     target_segment_duration: [
@@ -88,7 +94,8 @@ defmodule Membrane.HLS.SinkBin do
        opts: opts,
        flush: opts.flush_on_end,
        ended_sinks: MapSet.new(),
-       live_state: nil
+       live_state: nil,
+       live_playlist?: HLS.Packager.sliding_window_enabled?(opts.packager)
      }}
   end
 
@@ -121,6 +128,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
+      |> maybe_add_shifter(track_id, state)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
         min_duration: pad_opts.segment_duration
       })
@@ -141,6 +149,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
+      |> maybe_add_shifter(track_id, state)
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -163,6 +172,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
+      |> maybe_add_shifter(track_id, state)
       |> via_in(Pad.ref(:input), options: [stream_type: :H264])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.MPEG.TS.Aggregator{
@@ -185,6 +195,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
+      |> maybe_add_shifter(track_id, state)
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
       })
@@ -205,6 +216,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
+      |> maybe_add_shifter(track_id, state)
       |> child({:cues, track_id}, %Membrane.WebVTT.CueBuilderFilter{
         min_duration: Membrane.Time.milliseconds(1500)
       })
@@ -326,5 +338,25 @@ defmodule Membrane.HLS.SinkBin do
     Process.send_after(self(), :sync, deadline, abs: true)
 
     %{state | live_state: live_state}
+  end
+
+  defp maybe_add_shifter(spec, _track_id, %{live_playlist?: false}), do: spec
+
+  defp maybe_add_shifter(spec, track_id, state) do
+    child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{
+      duration: track_pts(state.opts.packager, track_id)
+    })
+  end
+
+  defp track_pts(packager, track_id) do
+    case HLS.Packager.track_duration(packager, track_id) do
+      {:ok, duration} ->
+        duration
+        |> Ratio.new()
+        |> Membrane.Time.seconds()
+
+      {:error, :not_found} ->
+        0
+    end
   end
 end

@@ -38,8 +38,7 @@ defmodule Membrane.HLS.CMAFSink do
       |> Ratio.ceil()
 
     if Packager.has_track?(state.opts.packager, track_id) do
-      # TODO: Render this configurable
-      # Packager.discontinue_track(packager, track_id)
+      Packager.discontinue_track(state.opts.packager, track_id)
     else
       Packager.add_track(
         state.opts.packager,
