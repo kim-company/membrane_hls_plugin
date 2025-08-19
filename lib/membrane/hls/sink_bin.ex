@@ -89,6 +89,11 @@ defmodule Membrane.HLS.SinkBin do
 
   @impl true
   def handle_init(_context, opts) do
+    true =
+      opts.packager
+      |> GenServer.whereis()
+      |> Process.link()
+
     {[],
      %{
        opts: opts,
