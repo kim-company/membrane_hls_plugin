@@ -37,20 +37,16 @@ defmodule Membrane.HLS.TSSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    if Packager.has_track?(state.opts.packager, track_id) do
-      Packager.discontinue_track(state.opts.packager, track_id)
-    else
-      stream = state.opts.build_stream.(format)
+    stream = state.opts.build_stream.(format)
 
-      Packager.add_track(
-        state.opts.packager,
-        track_id,
-        codecs: Map.get(stream, Access.key!(:codecs), []),
-        stream: stream,
-        segment_extension: ".ts",
-        target_segment_duration: target_segment_duration
-      )
-    end
+    Packager.add_track(
+      state.opts.packager,
+      track_id,
+      codecs: Map.get(stream, Access.key!(:codecs), []),
+      stream: stream,
+      segment_extension: ".ts",
+      target_segment_duration: target_segment_duration
+    )
 
     {[], state}
   end

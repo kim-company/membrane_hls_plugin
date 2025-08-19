@@ -94,6 +94,13 @@ defmodule Membrane.HLS.SinkBin do
       |> GenServer.whereis()
       |> Process.link()
 
+    discontinue? =
+      opts.packager
+      |> Packager.tracks()
+      |> Enum.any?()
+
+    if discontinue?, do: Packager.discontinue(opts.packager)
+
     {[],
      %{
        opts: opts,
@@ -282,9 +289,7 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   def handle_info(:sync, _ctx, state) do
-    Membrane.Logger.debug(
-      "Packager: syncing playlists up to #{state.live_state.next_sync_point}s"
-    )
+    Membrane.Logger.debug("Packager: syncing playlists up to #{state.live_state.next_sync_point}")
 
     Packager.sync(state.opts.packager, state.live_state.next_sync_point)
 
@@ -302,9 +307,7 @@ defmodule Membrane.HLS.SinkBin do
   defp live_schedule_next_sync(state) do
     state =
       state
-      |> update_in([:live_state, :next_sync_point], fn x ->
-        x + Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
-      end)
+      |> update_in([:live_state, :next_sync_point], fn x -> x + 1 end)
       |> update_in([:live_state, :next_deadline], fn x ->
         x + Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
       end)
@@ -315,11 +318,7 @@ defmodule Membrane.HLS.SinkBin do
 
   defp live_init_state(state) do
     # Tells where in the playlist we should start issuing segments.
-    next_sync_point =
-      Packager.next_sync_point(
-        state.opts.packager,
-        Membrane.Time.as_seconds(state.opts.target_segment_duration, :round)
-      )
+    next_sync_point = Packager.next_sync_point(state.opts.packager)
 
     {:live, safety_delay} = state.opts.mode
     now = :erlang.monotonic_time(:millisecond)
@@ -335,7 +334,7 @@ defmodule Membrane.HLS.SinkBin do
     live_state = %{
       # The next_sync_point is already rounded to the next segment. So we add two more segments to
       # reach the minimum of 3 segments.
-      next_sync_point: next_sync_point + div(target_segment_duration_ms * 2, 1000),
+      next_sync_point: next_sync_point,
       next_deadline: deadline,
       stop: false
     }

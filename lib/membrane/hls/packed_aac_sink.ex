@@ -38,30 +38,26 @@ defmodule Membrane.HLS.PackedAACSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    if Packager.has_track?(state.opts.packager, track_id) do
-      Packager.discontinue_track(state.opts.packager, track_id)
-    else
-      stream = state.opts.build_stream.(format)
+    stream = state.opts.build_stream.(format)
 
-      info = %{
-        mp4a: %{
-          aot_id: Membrane.AAC.profile_to_aot_id(format.profile),
-          channels: Membrane.AAC.channels_to_channel_config_id(format.channels),
-          frequency: format.sample_rate
-        }
+    info = %{
+      mp4a: %{
+        aot_id: Membrane.AAC.profile_to_aot_id(format.profile),
+        channels: Membrane.AAC.channels_to_channel_config_id(format.channels),
+        frequency: format.sample_rate
       }
+    }
 
-      codecs = Membrane.HLS.serialize_codecs(info)
+    codecs = Membrane.HLS.serialize_codecs(info)
 
-      Packager.add_track(
-        state.opts.packager,
-        track_id,
-        codecs: codecs,
-        stream: stream,
-        segment_extension: ".aac",
-        target_segment_duration: target_segment_duration
-      )
-    end
+    Packager.add_track(
+      state.opts.packager,
+      track_id,
+      codecs: codecs,
+      stream: stream,
+      segment_extension: ".aac",
+      target_segment_duration: target_segment_duration
+    )
 
     {[], state}
   end
