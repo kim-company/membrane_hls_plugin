@@ -283,6 +283,51 @@ defmodule Membrane.HLS.SinkBin do
     end
   end
 
+  # TODO: shall we check that this notification is only delivered for live playlists?
+  def handle_parent_notification({:reset_deadline, _downtime}, _ctx, state = %{live_state: nil}) do
+    Membrane.Logger.debug("Initializing live state from :reset_deadline notification")
+    {[], live_init_state(state)}
+  end
+
+  def handle_parent_notification({:reset_deadline, downtime}, _ctx, state) do
+    # In case of input drops, this notification can be used to make the sink
+    # wait again as if the pipeline just restarted before trying to syncronize
+    # new playlists.
+    downtime_ms = Membrane.Time.as_milliseconds(downtime, :round)
+    sync_timeout_ms = sync_timeout(state)
+
+    timeout =
+      if downtime_ms < sync_timeout_ms do
+        # We just have to wait for the duration of the downtime to get
+        # back to the state we were before.
+        downtime_ms
+      else
+        sync_timeout_ms
+      end
+
+    Membrane.Logger.info(
+      "Deadline reset. Restoring playlist syncronization in #{Float.round(timeout / 1.0e3, 3)}s"
+    )
+
+    state = update_in(state, [:live_state, :next_deadline], fn x -> x + timeout end)
+
+    state =
+      update_in(
+        state,
+        [:live_state, :timer_ref],
+        fn old_ref ->
+          Process.cancel_timer(old_ref)
+          Process.send_after(self(), :sync, state.live_state.next_deadline, abs: true)
+        end
+      )
+
+    {[], state}
+  end
+
+  def handle_parent_notification(_, _ctx, state) do
+    {[], state}
+  end
+
   @impl true
   def handle_info(:sync, _ctx, state = %{live_state: %{stop: true}}) do
     {[], state}
@@ -312,34 +357,43 @@ defmodule Membrane.HLS.SinkBin do
         x + Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
       end)
 
-    Process.send_after(self(), :sync, state.live_state.next_deadline, abs: true)
     state
+    |> put_in(
+      [:live_state, :timer_ref],
+      Process.send_after(self(), :sync, state.live_state.next_deadline, abs: true)
+    )
+  end
+
+  defp sync_timeout(state) do
+    # We wait until we have at least 3 segments before starting the initial sync process.
+    # This ensures a stable, interruption free playback for the clients.
+    {:live, safety_delay} = state.opts.mode
+
+    target_segment_duration_ms =
+      Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
+
+    Membrane.Time.as_milliseconds(safety_delay, :round) + target_segment_duration_ms * 3
   end
 
   defp live_init_state(state) do
     # Tells where in the playlist we should start issuing segments.
     next_sync_point = Packager.next_sync_point(state.opts.packager)
-
-    {:live, safety_delay} = state.opts.mode
     now = :erlang.monotonic_time(:millisecond)
+    timeout = sync_timeout(state)
+    deadline = now + timeout
 
-    target_segment_duration_ms =
-      Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
-
-    # We wait until we have at least 3 segments before starting the initial sync process.
-    # This ensures a stable, interruption free playback for the clients.
-    deadline =
-      now + Membrane.Time.as_milliseconds(safety_delay, :round) + target_segment_duration_ms * 3
+    Membrane.Logger.info(
+      "Deadline reset. Starting playlist syncronization in #{Float.round(timeout / 1.0e3, 3)}s"
+    )
 
     live_state = %{
       # The next_sync_point is already rounded to the next segment. So we add two more segments to
       # reach the minimum of 3 segments.
       next_sync_point: next_sync_point,
       next_deadline: deadline,
-      stop: false
+      stop: false,
+      timer_ref: Process.send_after(self(), :sync, deadline, abs: true)
     }
-
-    Process.send_after(self(), :sync, deadline, abs: true)
 
     %{state | live_state: live_state}
   end
