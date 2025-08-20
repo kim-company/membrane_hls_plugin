@@ -37,12 +37,28 @@ defmodule Membrane.HLS.TSSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    stream = state.opts.build_stream.(format)
+    {codecs, stream} =
+      case state.opts.build_stream.(format) do
+        {format, stream} ->
+          info = %{
+            mp4a: %{
+              aot_id: Membrane.AAC.profile_to_aot_id(format.profile),
+              channels: Membrane.AAC.channels_to_channel_config_id(format.channels),
+              frequency: format.sample_rate
+            }
+          }
+
+          codecs = Membrane.HLS.serialize_codecs(info)
+          {codecs, stream}
+
+        stream ->
+          {Map.get(stream, Access.key!(:codecs), []), stream}
+      end
 
     Packager.add_track(
       state.opts.packager,
       track_id,
-      codecs: Map.get(stream, Access.key!(:codecs), []),
+      codecs: codecs,
       stream: stream,
       segment_extension: ".ts",
       target_segment_duration: target_segment_duration

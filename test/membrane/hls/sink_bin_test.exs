@@ -180,6 +180,69 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
   end
 
+  defp build_full_mpeg_ts_spec() do
+    # %{mp4a: %{channels: 2, aot_id: 2, frequency: 44100}}
+    # %{avc1: %{profile: 100, level: 31, compatibility: 0}}
+
+    [
+      get_child(:demuxer)
+      |> via_out(:audio)
+      |> child(:aac_parser, %Membrane.AAC.Parser{
+        out_encapsulation: :ADTS
+      })
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          container: :TS,
+          segment_duration: Membrane.Time.seconds(6),
+          build_stream: fn _format ->
+            %HLS.AlternativeRendition{
+              uri: nil,
+              name: "Audio (EN)",
+              type: :audio,
+              group_id: "audio",
+              language: "en",
+              channels: "2",
+              default: true,
+              autoselect: true
+            }
+          end
+        ]
+      )
+      |> get_child(:sink),
+      get_child(:demuxer)
+      |> via_out(:video)
+      |> child(:h264_parser, %Membrane.NALU.ParserBin{
+        assume_aligned: true,
+        alignment: :aud
+      })
+      |> via_in(Pad.ref(:input, "video_460x720"),
+        options: [
+          encoding: :H264,
+          container: :TS,
+          segment_duration: Membrane.Time.seconds(6),
+          build_stream: fn _format ->
+            codecs =
+              Membrane.HLS.serialize_codecs(%{
+                avc1: %{profile: 100, level: 31, compatibility: 0}
+              })
+
+            %HLS.VariantStream{
+              uri: nil,
+              bandwidth: 850_000,
+              resolution: {460, 720},
+              frame_rate: 30.0,
+              codecs: codecs,
+              audio: "audio",
+              subtitles: "subtitles"
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+  end
+
   defp assert_hls_output(packager, manifest_uri) do
     # Get registered tracks from packager as source of truth
     tracks = HLS.Packager.tracks(packager)
@@ -356,6 +419,30 @@ defmodule Membrane.HLS.SinkBinTest do
       |> build_base_spec()
       |> Enum.concat(build_subtitles_spec())
       |> Enum.concat(build_mpeg_ts_spec())
+
+    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
+    assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
+    :ok = Membrane.Pipeline.terminate(pipeline)
+
+    # Validate the generated HLS output
+    assert_hls_output(packager, URI.new!("file://#{tmp_dir}/stream.m3u8"))
+  end
+
+  @tag :tmp_dir
+  test "on a new stream, MPEG-TS with AAC", %{tmp_dir: tmp_dir} do
+    {:ok, packager} =
+      HLS.Packager.start_link(
+        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
+        storage: HLS.Storage.File.new(),
+        resume_finished_tracks: true,
+        restore_pending_segments: false
+      )
+
+    spec =
+      packager
+      |> build_base_spec()
+      |> Enum.concat(build_subtitles_spec())
+      |> Enum.concat(build_full_mpeg_ts_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)

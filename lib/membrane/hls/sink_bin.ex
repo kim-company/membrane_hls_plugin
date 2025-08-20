@@ -156,6 +156,35 @@ defmodule Membrane.HLS.SinkBin do
 
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
+        %{pad_options: %{encoding: :AAC, container: :TS} = pad_opts},
+        state
+      ) do
+    spec =
+      bin_input(pad)
+      |> maybe_add_shifter(track_id, state)
+      |> child({:adapter, track_id}, %Membrane.HLS.StreamFormatAdapter{
+        stream_format: %Membrane.RemoteStream{
+          content_format: %{stream_type: :AAC},
+          type: :bytestream
+        }
+      })
+      |> via_in(Pad.ref(:input))
+      |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
+      |> child({:aggregator, track_id}, %Membrane.MPEG.TS.Aggregator{
+        target_duration: pad_opts.segment_duration
+      })
+      |> child({:sink, track_id}, %Membrane.HLS.TSSink{
+        packager: state.opts.packager,
+        track_id: track_id,
+        target_segment_duration: state.opts.target_segment_duration,
+        build_stream: pad_opts.build_stream
+      })
+
+    {[spec: spec], state}
+  end
+
+  def handle_pad_added(
+        Pad.ref(:input, track_id) = pad,
         %{pad_options: %{encoding: :AAC} = pad_opts},
         state
       ) do
@@ -188,7 +217,7 @@ defmodule Membrane.HLS.SinkBin do
       |> via_in(Pad.ref(:input), options: [stream_type: :H264])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.MPEG.TS.Aggregator{
-        min_duration: pad_opts.segment_duration
+        target_duration: pad_opts.segment_duration
       })
       |> child({:sink, track_id}, %Membrane.HLS.TSSink{
         packager: state.opts.packager,
