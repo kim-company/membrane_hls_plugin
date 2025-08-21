@@ -16,6 +16,7 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
   - CMAF segments (default) - Modern fragmented MP4
   - MPEG-TS segments - Traditional transport stream
   - Packed AAC - Audio-only streams
+  - **AAC over TS** - ⚠️ **Experimental**: Audio streams packed in Transport Stream containers
   - WebVTT - Subtitle tracks
 
 - **Stream Types Supported**:

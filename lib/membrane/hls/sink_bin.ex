@@ -2,6 +2,11 @@ defmodule Membrane.HLS.SinkBin do
   @moduledoc """
   Bin responsible for receiving audio and video streams, performing payloading and CMAF/TS/AAC
   muxing to eventually store them using provided storage configuration.
+
+  ## Experimental Features
+
+  **AAC over TS support is experimental** - Packing audio streams directly into Transport Stream
+  containers may not be fully stable and could have compatibility issues with some players.
   """
   use Membrane.Bin
   alias HLS.Packager
@@ -154,6 +159,7 @@ defmodule Membrane.HLS.SinkBin do
     {[spec: spec], state}
   end
 
+  # EXPERIMENTAL: AAC over TS support is experimental and may have compatibility issues
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
         %{pad_options: %{encoding: :AAC, container: :TS} = pad_opts},
