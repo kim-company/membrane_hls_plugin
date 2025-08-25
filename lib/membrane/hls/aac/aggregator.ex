@@ -78,7 +78,8 @@ defmodule Membrane.HLS.AAC.Aggregator do
       |> Stream.map(fn x -> x.payload end)
       |> Enum.join()
 
-    payload = encode_id3v2_priv_timestamp(state.pts) <> payload
+    payload =
+      encode_id3v2_priv_timestamp(state.pts + Membrane.Time.microseconds(1)) <> payload
 
     metadata = %{
       duration: duration
