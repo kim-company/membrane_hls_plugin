@@ -79,6 +79,12 @@ defmodule Membrane.HLS.SinkBin do
         which they start.
         """
       ],
+      relative_mpeg_ts_timestamps: [
+        spec: boolean(),
+        default: false,
+        description:
+          "If true, each subtitle segment will have a X-TIMESTAMP-MAP header and its contents will be relative to that timing."
+      ],
       build_stream: [
         spec: (track() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
         description: "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`."
@@ -270,7 +276,7 @@ defmodule Membrane.HLS.SinkBin do
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: pad_opts.segment_duration,
         omit_repetition: pad_opts.omit_subtitle_repetition,
-        resume: true,
+        relative_mpeg_ts_timestamps: pad_opts.relative_mpeg_ts_timestamps,
         headers: [
           %Subtitle.WebVTT.HeaderLine{key: :description, original: "WEBVTT"}
         ]
