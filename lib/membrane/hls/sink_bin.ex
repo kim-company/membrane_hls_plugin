@@ -79,6 +79,14 @@ defmodule Membrane.HLS.SinkBin do
         which they start.
         """
       ],
+      subtitle_min_duration: [
+        spec: Membrane.Time.t(),
+        default: Membrane.Time.milliseconds(1500),
+        description: """
+        Forces subtitles to last at list the specified amount of time. If omitted, subtitles will
+        last the duration of their content.
+        """
+      ],
       relative_mpeg_ts_timestamps: [
         spec: boolean(),
         default: false,
@@ -284,7 +292,7 @@ defmodule Membrane.HLS.SinkBin do
       bin_input(pad)
       |> maybe_add_shifter(track_id, state)
       |> child({:cues, track_id}, %Membrane.WebVTT.CueBuilderFilter{
-        min_duration: Membrane.Time.milliseconds(1500)
+        min_duration: pad_opts.subtitle_min_duration
       })
       |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
         segment_duration: pad_opts.segment_duration,
