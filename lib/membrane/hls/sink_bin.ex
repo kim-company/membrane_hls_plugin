@@ -94,6 +94,18 @@ defmodule Membrane.HLS.SinkBin do
         description: """
         Duration for a HLS segment.
         """
+      ],
+      audio_offset: [
+        spec: Membrane.Time.t(),
+        default: 0,
+        description: """
+        Initial AAC offset w.r.t the video.
+
+        The very first segment of the audio can be used to re-align audio/video streams. Usually when
+        an encoder starts producing audio and video data, the initial video PTS/DTS might start with a difference due to the presence of B frames (e.g. DTS 2.67, PTS 2.7).
+        Setting the offset to that difference (which is usually deterministic based on encoder's settings)
+        will make the subsequent segments align.
+        """
       ]
     ]
   )
@@ -153,7 +165,8 @@ defmodule Membrane.HLS.SinkBin do
       bin_input(pad)
       |> maybe_add_shifter(track_id, state)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
-        target_duration: pad_opts.segment_duration
+        target_duration: pad_opts.segment_duration,
+        offset: pad_opts.audio_offset
       })
       |> child({:sink, track_id}, %Membrane.HLS.PackedAACSink{
         packager: state.opts.packager,

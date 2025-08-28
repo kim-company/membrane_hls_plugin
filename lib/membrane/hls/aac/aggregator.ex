@@ -1,5 +1,6 @@
 defmodule Membrane.HLS.AAC.Aggregator do
   use Membrane.Filter
+  require Membrane.Logger
 
   def_input_pad(:input,
     accepted_format: Membrane.AAC
@@ -15,12 +16,23 @@ defmodule Membrane.HLS.AAC.Aggregator do
       description: """
       Segments will converge to this duration.
       """
+    ],
+    offset: [
+      spec: Membrane.Time.t(),
+      default: 0,
+      description: """
+      The very first segment of the audio can be used to re-align audio/video streams. Usually when
+      an encoder starts producing audio and video data, the initial video PTS/DTS might start with a difference due to the presence of B frames (e.g. DTS 2.67, PTS 2.7).
+      Setting the offset to that difference (which is usually deterministic based on encoder's settings)
+      will make the subsequent segments align.
+      """
     ]
   )
 
   @impl true
   def handle_init(_ctx, opts) do
-    {[], %{target_duration: opts.target_duration, acc: [], pts: nil, accumulated_offset: 0}}
+    {[],
+     %{target_duration: opts.target_duration, acc: [], pts: nil, accumulated_offset: -opts.offset}}
   end
 
   @impl true
@@ -65,21 +77,29 @@ defmodule Membrane.HLS.AAC.Aggregator do
   end
 
   defp finalize_segment(state) do
-    # NOTE: we're loosing the last frame's duration!
+    # NOTE: we're loosing the last frame's duration! we can still compute it
+    # by checking the number of AAC frames in the payload: @ 48000 sample rate and
+    # 1024 samples per frame, we have 21ms per buffer)
     buffers = Enum.reverse(state.acc)
     duration = List.last(buffers).pts - state.pts
     finalize_segment(state, duration)
   end
 
   defp finalize_segment(state, duration) do
+    duration_pretty =
+      duration
+      |> Membrane.Time.as_seconds()
+      |> Ratio.to_float()
+
+    Membrane.Logger.warning("AAC segment duration: #{duration_pretty}s")
+
     payload =
       state.acc
       |> Enum.reverse()
       |> Stream.map(fn x -> x.payload end)
       |> Enum.join()
 
-    payload =
-      encode_id3v2_priv_timestamp(state.pts + Membrane.Time.microseconds(1)) <> payload
+    payload = encode_id3v2_priv_timestamp(state.pts) <> payload
 
     metadata = %{
       duration: duration
