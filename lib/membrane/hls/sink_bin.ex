@@ -291,10 +291,10 @@ defmodule Membrane.HLS.SinkBin do
     spec =
       bin_input(pad)
       |> maybe_add_shifter(track_id, state)
-      |> child({:cues, track_id}, %Membrane.WebVTT.CueBuilderFilter{
+      |> child({:cues, track_id}, %Membrane.WebVTT.Filter{
         min_duration: pad_opts.subtitle_min_duration
       })
-      |> child({:segments, track_id}, %Membrane.WebVTT.SegmentFilter{
+      |> child({:segments, track_id}, %Membrane.HLS.WebVTT.Aggregator{
         segment_duration: pad_opts.segment_duration,
         omit_repetition: pad_opts.omit_subtitle_repetition,
         relative_mpeg_ts_timestamps: pad_opts.relative_mpeg_ts_timestamps,

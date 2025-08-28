@@ -34,7 +34,7 @@ defmodule Membrane.HLS.MixProject do
       {:membrane_aac_plugin, "~> 0.18"},
       {:membrane_h26x_plugin, "~> 0.10"},
       {:membrane_text_format, "~> 1.0"},
-      {:membrane_webvtt_plugin, "~> 2.0"},
+      {:membrane_webvtt_plugin, "~> 3.0"},
       {:membrane_mpeg_ts_plugin, "~> 1.3"},
       {:membrane_flv_plugin, "~> 0.13", only: :test},
       {:membrane_nalu_plugin, "~> 0.1", only: :test},
