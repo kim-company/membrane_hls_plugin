@@ -1,6 +1,5 @@
 defmodule Membrane.HLS.AAC.Aggregator do
   use Membrane.Filter
-  require Membrane.Logger
 
   def_input_pad(:input,
     accepted_format: Membrane.AAC
@@ -86,13 +85,6 @@ defmodule Membrane.HLS.AAC.Aggregator do
   end
 
   defp finalize_segment(state, duration) do
-    duration_pretty =
-      duration
-      |> Membrane.Time.as_seconds()
-      |> Ratio.to_float()
-
-    Membrane.Logger.warning("AAC segment duration: #{duration_pretty}s")
-
     payload =
       state.acc
       |> Enum.reverse()
