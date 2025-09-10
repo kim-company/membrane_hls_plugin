@@ -74,7 +74,7 @@ defmodule Membrane.HLS.WebVTT.Aggregator do
 
   defp buffer_to_cue(buffer) do
     %Subtitle.Cue{
-      text: buffer.payload,
+      text: String.trim(buffer.payload),
       from: Time.as_milliseconds(buffer.pts, :round),
       to: Time.as_milliseconds(buffer.metadata.to, :round)
     }
