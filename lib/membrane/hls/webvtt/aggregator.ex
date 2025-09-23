@@ -64,12 +64,14 @@ defmodule Membrane.HLS.WebVTT.Aggregator do
 
   @impl true
   def handle_end_of_stream(_, _ctx, state) do
-    {buffer, state} =
-      get_and_update_in(state, [:segment], fn segment ->
-        {segment_to_buffer(segment, state), nil}
-      end)
+    case state.segment do
+      nil ->
+        {[end_of_stream: :output], state}
 
-    {[buffer: {:output, buffer}, end_of_stream: :output], state}
+      segment ->
+        buffer = segment_to_buffer(segment, state)
+        {[buffer: {:output, buffer}, end_of_stream: :output], put_in(state, [:segment], nil)}
+    end
   end
 
   defp buffer_to_cue(buffer) do
