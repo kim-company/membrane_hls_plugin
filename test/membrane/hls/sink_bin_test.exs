@@ -17,7 +17,7 @@ defmodule Membrane.HLS.SinkBinTest do
       child(:source, %Membrane.File.Source{
         location: @avsync
       })
-      |> child(:demuxer, Membrane.MPEG.TS.AVDemuxer)
+      |> child(:demuxer, Membrane.MPEG.TS.Demuxer)
     ]
   end
 
@@ -66,7 +66,7 @@ defmodule Membrane.HLS.SinkBinTest do
   defp build_cmaf_spec() do
     [
       get_child(:demuxer)
-      |> via_out(:audio)
+      |> via_out(:output, options: [stream_category: :audio])
       |> child(:aac_parser, %Membrane.AAC.Parser{
         out_encapsulation: :none,
         output_config: :esds
@@ -91,7 +91,7 @@ defmodule Membrane.HLS.SinkBinTest do
       )
       |> get_child(:sink),
       get_child(:demuxer)
-      |> via_out(:video)
+      |> via_out(:output, options: [stream_category: :video])
       |> child(:h264_parser, %Membrane.H264.Parser{
         generate_best_effort_timestamps: %{framerate: {25, 1}},
         output_stream_structure: :avc1
@@ -123,7 +123,7 @@ defmodule Membrane.HLS.SinkBinTest do
 
     [
       get_child(:demuxer)
-      |> via_out(:audio)
+      |> via_out(:output, options: [stream_category: :audio])
       |> child(:aac_parser, %Membrane.AAC.Parser{
         out_encapsulation: :ADTS
       })
@@ -148,7 +148,7 @@ defmodule Membrane.HLS.SinkBinTest do
       )
       |> get_child(:sink),
       get_child(:demuxer)
-      |> via_out(:video)
+      |> via_out(:output, options: [stream_category: :video])
       |> child(:h264_parser, %Membrane.NALU.ParserBin{
         assume_aligned: true,
         alignment: :aud
@@ -186,7 +186,7 @@ defmodule Membrane.HLS.SinkBinTest do
 
     [
       get_child(:demuxer)
-      |> via_out(:audio)
+      |> via_out(:output, options: [stream_category: :audio])
       |> child(:aac_parser, %Membrane.AAC.Parser{
         out_encapsulation: :ADTS
       })
@@ -211,7 +211,7 @@ defmodule Membrane.HLS.SinkBinTest do
       )
       |> get_child(:sink),
       get_child(:demuxer)
-      |> via_out(:video)
+      |> via_out(:output, options: [stream_category: :video])
       |> child(:h264_parser, %Membrane.NALU.ParserBin{
         assume_aligned: true,
         alignment: :aud
