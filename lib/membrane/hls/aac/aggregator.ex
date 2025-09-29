@@ -125,7 +125,7 @@ defmodule Membrane.HLS.AAC.Aggregator do
     payload =
       (pts / 1.0e9 * 90_000)
       |> round()
-      |> rem(2 ** 33 - 1)
+      |> rem(2 ** 33)
       |> then(fn ts ->
         <<ts::unsigned-big-integer-size(64)>>
       end)
