@@ -285,7 +285,7 @@ defmodule Membrane.HLS.SinkBin do
     spec =
       bin_input(pad)
       |> maybe_add_shifter(track_id, state)
-      |> child({:cues, track_id}, %Membrane.WebVTT.Filter{
+      |> child({:cues, track_id}, %Membrane.Subtitles.Builder{
         min_duration: pad_opts.subtitle_min_duration
       })
       |> child({:segments, track_id}, %Membrane.HLS.WebVTT.Aggregator{
