@@ -553,8 +553,14 @@ defmodule Membrane.HLS.SinkBin do
   defp maybe_add_shifter(spec, _track_id, %{live_playlist?: true}), do: spec
 
   defp maybe_add_shifter(spec, track_id, state) do
+    offset = track_pts(state.opts.packager, track_id)
+
+    Membrane.Logger.info(
+      "Adding shifter for track #{inspect(track_id)} with offset #{Float.round(offset / 1.0e9, 2)}s"
+    )
+
     child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{
-      duration: track_pts(state.opts.packager, track_id)
+      duration: offset
     })
   end
 
