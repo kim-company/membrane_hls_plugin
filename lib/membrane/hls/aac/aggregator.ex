@@ -15,23 +15,12 @@ defmodule Membrane.HLS.AAC.Aggregator do
       description: """
       Segments will converge to this duration.
       """
-    ],
-    offset: [
-      spec: Membrane.Time.t(),
-      default: 0,
-      description: """
-      The very first segment of the audio can be used to re-align audio/video streams. Usually when
-      an encoder starts producing audio and video data, the initial video PTS/DTS might start with a difference due to the presence of B frames (e.g. DTS 2.67, PTS 2.7).
-      Setting the offset to that difference (which is usually deterministic based on encoder's settings)
-      will make the subsequent segments align.
-      """
     ]
   )
 
   @impl true
   def handle_init(_ctx, opts) do
-    {[],
-     %{target_duration: opts.target_duration, acc: [], pts: nil, accumulated_offset: -opts.offset}}
+    {[], %{target_duration: opts.target_duration, acc: [], pts: nil, accumulated_offset: 0}}
   end
 
   @impl true
@@ -123,8 +112,8 @@ defmodule Membrane.HLS.AAC.Aggregator do
 
   defp encode_id3v2_priv_timestamp(pts) do
     payload =
-      (pts / 1.0e9 * 90_000)
-      |> round()
+      pts
+      |> MPEG.TS.convert_ns_to_ts()
       |> rem(2 ** 33)
       |> then(fn ts ->
         <<ts::unsigned-big-integer-size(64)>>

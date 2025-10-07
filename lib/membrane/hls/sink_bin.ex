@@ -48,6 +48,16 @@ defmodule Membrane.HLS.SinkBin do
       Automatically flush the packager when all streams ended.
       Set to `false` if flushing manually (via `:flush` notification).
       """
+    ],
+    shifter_t_zero_timeout: [
+      spec: Membrane.Time.t(),
+      default: Membrane.Time.seconds(3),
+      description: """
+      When the playlist is not a sliding window one, shifters are used to ensure
+      strictly monotonically increasing PTS/DTS segments (rewriting them). To find
+      the offset between the different playlists, this timeout is used to ensure
+      we're not deadlocking.
+      """
     ]
   )
 
@@ -102,18 +112,6 @@ defmodule Membrane.HLS.SinkBin do
         description: """
         Duration for a HLS segment.
         """
-      ],
-      audio_offset: [
-        spec: Membrane.Time.t(),
-        default: 0,
-        description: """
-        Initial AAC offset w.r.t the video.
-
-        The very first segment of the audio can be used to re-align audio/video streams. Usually when
-        an encoder starts producing audio and video data, the initial video PTS/DTS might start with a difference due to the presence of B frames (e.g. DTS 2.67, PTS 2.7).
-        Setting the offset to that difference (which is usually deterministic based on encoder's settings)
-        will make the subsequent segments align.
-        """
       ]
     ]
   )
@@ -132,14 +130,58 @@ defmodule Membrane.HLS.SinkBin do
 
     if discontinue?, do: Packager.discontinue(opts.packager)
 
+    live_playlist? = HLS.Packager.sliding_window_enabled?(opts.packager)
+
+    shifter_state =
+      if not live_playlist? do
+        %{
+          timer: nil,
+          timeout: opts.shifter_t_zero_timeout,
+          t_zero_acc: [],
+          t_zero_selected: nil
+        }
+      end
+
     {[],
      %{
        opts: opts,
        flush: opts.flush_on_end,
        ended_sinks: MapSet.new(),
        live_state: nil,
-       live_playlist?: HLS.Packager.sliding_window_enabled?(opts.packager)
+       live_playlist?: live_playlist?,
+       shifter_state: shifter_state
      }}
+  end
+
+  @impl true
+  def handle_child_notification(
+        {:t_zero, t},
+        {:shifter, track_id},
+        ctx,
+        state = %{shifter_state: %{t_zero_selected: nil}}
+      ) do
+    Membrane.Logger.debug("Shifter: received t_zero #{t} from #{inspect(track_id)}")
+
+    state =
+      state
+      |> update_in([:shifter_state, :timer], fn
+        nil ->
+          Process.send_after(
+            self(),
+            :shifter_t_zero_timeout,
+            Membrane.Time.as_milliseconds(state.shifter_state.timeout, :round)
+          )
+
+        x ->
+          x
+      end)
+      |> update_in([:shifter_state, :t_zero_acc], fn acc -> [t | acc] end)
+
+    if all_t_zero_received?(ctx, state) do
+      handle_t_zero_selection(ctx, state)
+    else
+      {[], state}
+    end
   end
 
   @impl true
@@ -173,8 +215,7 @@ defmodule Membrane.HLS.SinkBin do
       bin_input(pad)
       |> maybe_add_shifter(track_id, state)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
-        target_duration: pad_opts.segment_duration,
-        offset: pad_opts.audio_offset
+        target_duration: pad_opts.segment_duration
       })
       |> child({:sink, track_id}, %Membrane.HLS.PackedAACSink{
         packager: state.opts.packager,
@@ -395,6 +436,54 @@ defmodule Membrane.HLS.SinkBin do
     Packager.sync(state.opts.packager, state.live_state.next_sync_point)
 
     {[], live_schedule_next_sync(state)}
+  end
+
+  def handle_info(:shifter_t_zero_timeout, ctx, state) do
+    if not all_t_zero_received?(ctx, state) do
+      Membrane.Logger.warning("Shifter: not all shifters have reported their t_zero")
+    end
+
+    handle_t_zero_selection(ctx, state)
+  end
+
+  defp handle_t_zero_selection(
+         ctx,
+         state = %{shifter_state: %{t_zero_selected: nil, t_zero_acc: acc}}
+       ) do
+    t_zero = Enum.min(acc)
+
+    Membrane.Logger.debug(
+      "Shifter: selected t_zero #{t_zero} out of #{inspect(acc, pretty: true)}"
+    )
+
+    state =
+      state
+      |> put_in([:shifter_state, :t_zero_selected], t_zero)
+      |> put_in([:shifter_state, :timer], fn x ->
+        if x != nil, do: Process.cancel_timer(x)
+        nil
+      end)
+
+    actions =
+      ctx.children
+      |> Enum.filter(fn {k, _v} -> match?({:shifter, _}, k) end)
+      |> Enum.map(fn {k, _} -> {:notify_child, {k, {:t_zero, t_zero}}} end)
+
+    {actions, state}
+  end
+
+  defp handle_t_zero_selection(_ctx, state) do
+    {[], state}
+  end
+
+  defp all_t_zero_received?(ctx, state) do
+    shifter_count =
+      ctx.children
+      |> Enum.filter(fn {k, _v} -> match?({:shifter, _}, k) end)
+      |> Enum.count()
+
+    t_zero_count = Enum.count(state.shifter_state.t_zero_acc)
+    shifter_count == t_zero_count
   end
 
   defp all_streams_ended?(ctx, ended_sinks) do

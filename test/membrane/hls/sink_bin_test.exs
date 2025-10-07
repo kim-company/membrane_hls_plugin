@@ -1,5 +1,5 @@
 defmodule Membrane.HLS.SinkBinTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   use Membrane.Pipeline
 
   import Membrane.Testing.Assertions
@@ -10,7 +10,8 @@ defmodule Membrane.HLS.SinkBinTest do
     [
       child(:sink, %Membrane.HLS.SinkBin{
         packager: packager,
-        target_segment_duration: Membrane.Time.seconds(7)
+        target_segment_duration: Membrane.Time.seconds(7),
+        shifter_t_zero_timeout: Membrane.Time.milliseconds(100)
       }),
 
       # Source
