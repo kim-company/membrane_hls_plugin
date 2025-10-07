@@ -160,7 +160,7 @@ defmodule Membrane.HLS.SinkBin do
         ctx,
         state = %{shifter_state: %{t_zero_selected: nil}}
       ) do
-    Membrane.Logger.debug("Shifter: received t_zero #{t} from #{inspect(track_id)}")
+    Membrane.Logger.debug("Received t_zero #{t} from #{inspect(track_id)}")
 
     state =
       state
@@ -175,7 +175,7 @@ defmodule Membrane.HLS.SinkBin do
         x ->
           x
       end)
-      |> update_in([:shifter_state, :t_zero_acc], fn acc -> [t | acc] end)
+      |> update_in([:shifter_state, :t_zero_acc], fn acc -> [{track_id, t} | acc] end)
 
     if all_t_zero_received?(ctx, state) do
       handle_t_zero_selection(ctx, state)
@@ -440,7 +440,16 @@ defmodule Membrane.HLS.SinkBin do
 
   def handle_info(:shifter_t_zero_timeout, ctx, state) do
     if not all_t_zero_received?(ctx, state) do
-      Membrane.Logger.warning("Shifter: not all shifters have reported their t_zero")
+      have = Enum.map(state.shifter_state.t_zero_acc, fn {x, _} -> x end)
+
+      want =
+        ctx.children
+        |> Enum.filter(fn {k, _v} -> match?({:shifter, _}, k) end)
+        |> Enum.map(fn {{:shifter, track_id}, _} -> track_id end)
+
+      Membrane.Logger.warning(
+        "Not all shifters have reported their t_zero: have=#{inspect(have)}, want=#{inspect(want)}"
+      )
     end
 
     handle_t_zero_selection(ctx, state)
@@ -450,11 +459,9 @@ defmodule Membrane.HLS.SinkBin do
          ctx,
          state = %{shifter_state: %{t_zero_selected: nil, t_zero_acc: acc}}
        ) do
-    t_zero = Enum.min(acc)
+    {_, t_zero} = Enum.min_by(acc, fn {_, x} -> x end)
 
-    Membrane.Logger.debug(
-      "Shifter: selected t_zero #{t_zero} out of #{inspect(acc, pretty: true)}"
-    )
+    Membrane.Logger.info("Shifter: selected t_zero #{t_zero} out of #{inspect(acc)}")
 
     state =
       state

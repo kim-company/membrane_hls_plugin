@@ -13,13 +13,6 @@ defmodule Membrane.HLS.Shifter do
   """
   use Membrane.Filter
 
-  # This is here to make sure we're not creating negative timestamps. A safe
-  # bet is framerate duration * 16 (maximum frame reordering for h264)
-  @min_offset 6
-              |> Membrane.Time.seconds()
-              |> MPEG.TS.convert_ns_to_ts()
-              |> MPEG.TS.convert_ts_to_ns()
-
   def_input_pad(:input,
     accepted_format: any_of(Membrane.H264, Membrane.AAC, Membrane.Text, Membrane.RemoteStream)
   )
@@ -41,7 +34,7 @@ defmodule Membrane.HLS.Shifter do
   def handle_init(_ctx, opts) do
     {[],
      %{
-       offset: max(opts.duration, @min_offset),
+       offset: opts.duration,
        waiting_first_buffer: true,
        waiting_t_zero: true,
        queue: :queue.new(),
