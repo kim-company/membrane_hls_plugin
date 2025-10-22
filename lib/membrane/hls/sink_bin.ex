@@ -219,7 +219,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state)
+      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.AAC)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
         target_duration: pad_opts.segment_duration
       })
@@ -233,7 +233,6 @@ defmodule Membrane.HLS.SinkBin do
     {[spec: spec], register_time_observer(state, track_id, 1)}
   end
 
-  # EXPERIMENTAL: AAC over TS support is experimental and may have compatibility issues
   def handle_pad_added(
         Pad.ref(:input, track_id) = pad,
         %{pad_options: %{encoding: :AAC, container: :TS} = pad_opts},
@@ -241,7 +240,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state)
+      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.AAC)
       |> via_in(:input, options: [stream_type: :AAC_ADTS])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.HLS.MPEG.TS.Aggregator{
@@ -264,7 +263,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state)
+      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.AAC)
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -331,7 +330,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state)
+      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.Text)
       |> child({:cues, track_id}, %Membrane.WebVTT.Filter{
         min_duration: pad_opts.subtitle_min_duration
       })
@@ -522,12 +521,17 @@ defmodule Membrane.HLS.SinkBin do
     put_in(state, [:time_discovery, :candidates, track_id], prio)
   end
 
-  defp add_track_guardrails(spec, track_id, state) do
-    # TODO: add in order
-    # - trimmer
-    # - filler
+  defp add_track_guardrails(spec, track_id, state, filler \\ nil) do
     spec
     |> child({:time_observer, track_id}, Membrane.HLS.TimeObserver)
+    |> child({:trimmer, track_id}, Membrane.HLS.Trimmer)
+    |> then(fn spec ->
+      if filler do
+        child(spec, {:filler, track_id}, filler)
+      else
+        spec
+      end
+    end)
     |> maybe_add_shifter(track_id, state)
   end
 
