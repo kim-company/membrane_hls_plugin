@@ -3,10 +3,20 @@ defmodule Membrane.HLS.SinkBin do
   Bin responsible for receiving audio and video streams, performing payloading and CMAF/TS/AAC
   muxing to eventually store them using provided storage configuration.
 
-  ## Experimental Features
+  As soon as a spec-compliant HLS stream which segments of the same index:
+  - start roughly at the same time (AAC and H264 cannot be cut at the same exact time)
+  - have the same duration
 
-  **AAC over TS support is experimental** - Packing audio streams directly into Transport Stream
-  containers may not be fully stable and could have compatibility issues with some players.
+  The following measures have been implemented:
+  - audio+subtitles fillers: if video starts earlier, we add the missing silence
+  - audio+subtitles trimmers: if video starts later, we trim leading content
+
+  Special cases for our companies internal requirements (might change in the future):
+  - when in a sliding window setup, we use discontinuities when the stream restarts
+  - when in a non-sliding window setup, playlists will contain a best-effort strictly
+  monotonically increasing PTS/DTS timeline. Best effort because right after a restart
+  audio and video will contain a small offset hole. This is **not** spec complaint and
+  we're planning on using the discontinuity pattern there as well.
   """
   use Membrane.Bin
   alias HLS.Packager
@@ -37,7 +47,8 @@ defmodule Membrane.HLS.SinkBin do
       default: :vod,
       description: """
       * {:live, safety_delay} -> This element will include the provided segments
-      in the media playlist each target_segment_duration.
+      in the media playlist each target_segment_duration. You're responsible for
+      providing data for the segments in time.
       * :vod -> At the end of the segment production, playlists are written down.
       """
     ],
@@ -47,16 +58,6 @@ defmodule Membrane.HLS.SinkBin do
       description: """
       Automatically flush the packager when all streams ended.
       Set to `false` if flushing manually (via `:flush` notification).
-      """
-    ],
-    shifter_t_zero_timeout: [
-      spec: Membrane.Time.t(),
-      default: Membrane.Time.seconds(3),
-      description: """
-      When the playlist is not a sliding window one, shifters are used to ensure
-      strictly monotonically increasing PTS/DTS segments (rewriting them). To find
-      the offset between the different playlists, this timeout is used to ensure
-      we're not deadlocking.
       """
     ]
   )
@@ -128,19 +129,9 @@ defmodule Membrane.HLS.SinkBin do
       |> Packager.tracks()
       |> Enum.any?()
 
+    # TODO: even though we command a discontinuity, this is not applied if
+    # sliding window is not enabled.
     if discontinue?, do: Packager.discontinue(opts.packager)
-
-    live_playlist? = HLS.Packager.sliding_window_enabled?(opts.packager)
-
-    shifter_state =
-      if not live_playlist? do
-        %{
-          timer: nil,
-          timeout: opts.shifter_t_zero_timeout,
-          t_zero_acc: [],
-          t_zero_selected: nil
-        }
-      end
 
     {[],
      %{
@@ -148,40 +139,55 @@ defmodule Membrane.HLS.SinkBin do
        flush: opts.flush_on_end,
        ended_sinks: MapSet.new(),
        live_state: nil,
-       live_playlist?: live_playlist?,
-       shifter_state: shifter_state
+       live_playlist?: HLS.Packager.sliding_window_enabled?(opts.packager),
+       time_discovery: %{
+         candidates: %{},
+         target_track: nil
+       }
      }}
   end
 
   @impl true
+  def handle_playing(_ctx, state) do
+    # We need to discover the time we're going to use as reference. If we have video,
+    # we're using it. If only audio/subtitles tracks are present, we're using one of those.
+    {track_id, _} =
+      state.time_discovery.candidates
+      |> Enum.sort(fn {_, left}, {_, right} -> left > right end)
+      |> List.first()
+
+    Membrane.Logger.info("Time reference will be obtained from track #{inspect(track_id)}")
+    state = put_in(state, [:time_discovery, :target_track], track_id)
+    {[], state}
+  end
+
+  @impl true
   def handle_child_notification(
-        {:t_zero, t},
-        {:shifter, track_id},
+        {:observed_time, t},
+        {:time_observer, track_id},
         ctx,
-        state = %{shifter_state: %{t_zero_selected: nil}}
+        state = %{time_discovery: %{target_track: track_id}}
       ) do
-    Membrane.Logger.debug("Received t_zero #{t} from #{inspect(track_id)}")
+    Membrane.Logger.info("Reference time discovered: #{t}")
 
-    state =
-      state
-      |> update_in([:shifter_state, :timer], fn
-        nil ->
-          Process.send_after(
-            self(),
-            :shifter_t_zero_timeout,
-            Membrane.Time.as_milliseconds(state.shifter_state.timeout, :round)
-          )
-
-        x ->
-          x
+    actions =
+      ctx.children
+      |> Enum.filter(fn
+        {{x, _track_id}, _info} when x in [:trimmer, :filler] -> true
+        _ -> false
       end)
-      |> update_in([:shifter_state, :t_zero_acc], fn acc -> [{track_id, t} | acc] end)
+      |> Enum.map(fn {k, _} -> {:notify_child, {k, {:time_reference, t}}} end)
 
-    if all_t_zero_received?(ctx, state) do
-      handle_t_zero_selection(ctx, state)
-    else
-      {[], state}
-    end
+    {actions, state}
+  end
+
+  def handle_child_notification({:observed_time, t}, {:time_observer, track_id}, _ctx, state) do
+    Membrane.Logger.debug("Observed time #{t} on track #{inspect(track_id)}")
+    {[], state}
+  end
+
+  def handle_child_notification(_notification, _child, _ctx, state) do
+    {[], state}
   end
 
   @impl true
@@ -213,7 +219,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> maybe_add_shifter(track_id, state)
+      |> add_track_guardrails(track_id, state)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
         target_duration: pad_opts.segment_duration
       })
@@ -224,7 +230,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    {[spec: spec], state}
+    {[spec: spec], register_time_observer(state, track_id, 1)}
   end
 
   # EXPERIMENTAL: AAC over TS support is experimental and may have compatibility issues
@@ -235,7 +241,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> maybe_add_shifter(track_id, state)
+      |> add_track_guardrails(track_id, state)
       |> via_in(:input, options: [stream_type: :AAC_ADTS])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.HLS.MPEG.TS.Aggregator{
@@ -248,7 +254,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    {[spec: spec], state}
+    {[spec: spec], register_time_observer(state, track_id, 1)}
   end
 
   def handle_pad_added(
@@ -258,7 +264,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> maybe_add_shifter(track_id, state)
+      |> add_track_guardrails(track_id, state)
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -271,7 +277,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    {[spec: spec], state}
+    {[spec: spec], register_time_observer(state, track_id, 1)}
   end
 
   def handle_pad_added(
@@ -281,7 +287,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> maybe_add_shifter(track_id, state)
+      |> add_track_guardrails(track_id, state)
       |> via_in(:input, options: [stream_type: :H264_AVC])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.HLS.MPEG.TS.Aggregator{
@@ -294,7 +300,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    {[spec: spec], state}
+    {[spec: spec], register_time_observer(state, track_id, 2)}
   end
 
   def handle_pad_added(
@@ -304,7 +310,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> maybe_add_shifter(track_id, state)
+      |> add_track_guardrails(track_id, state)
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
       })
@@ -315,7 +321,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    {[spec: spec], state}
+    {[spec: spec], register_time_observer(state, track_id, 2)}
   end
 
   def handle_pad_added(
@@ -325,7 +331,7 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> maybe_add_shifter(track_id, state)
+      |> add_track_guardrails(track_id, state)
       |> child({:cues, track_id}, %Membrane.WebVTT.Filter{
         min_duration: pad_opts.subtitle_min_duration
       })
@@ -344,7 +350,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    {[spec: spec], state}
+    {[spec: spec], register_time_observer(state, track_id)}
   end
 
   @impl true
@@ -438,61 +444,6 @@ defmodule Membrane.HLS.SinkBin do
     {[], live_schedule_next_sync(state)}
   end
 
-  def handle_info(:shifter_t_zero_timeout, ctx, state) do
-    if not all_t_zero_received?(ctx, state) do
-      have = Enum.map(state.shifter_state.t_zero_acc, fn {x, _} -> x end)
-
-      want =
-        ctx.children
-        |> Enum.filter(fn {k, _v} -> match?({:shifter, _}, k) end)
-        |> Enum.map(fn {{:shifter, track_id}, _} -> track_id end)
-
-      Membrane.Logger.warning(
-        "Not all shifters have reported their t_zero: have=#{inspect(have)}, want=#{inspect(want)}"
-      )
-    end
-
-    handle_t_zero_selection(ctx, state)
-  end
-
-  defp handle_t_zero_selection(
-         ctx,
-         state = %{shifter_state: %{t_zero_selected: nil, t_zero_acc: acc}}
-       ) do
-    {_, t_zero} = Enum.min_by(acc, fn {_, x} -> x end)
-
-    Membrane.Logger.info("Shifter: selected t_zero #{t_zero} out of #{inspect(acc)}")
-
-    state =
-      state
-      |> put_in([:shifter_state, :t_zero_selected], t_zero)
-      |> put_in([:shifter_state, :timer], fn x ->
-        if x != nil, do: Process.cancel_timer(x)
-        nil
-      end)
-
-    actions =
-      ctx.children
-      |> Enum.filter(fn {k, _v} -> match?({:shifter, _}, k) end)
-      |> Enum.map(fn {k, _} -> {:notify_child, {k, {:t_zero, t_zero}}} end)
-
-    {actions, state}
-  end
-
-  defp handle_t_zero_selection(_ctx, state) do
-    {[], state}
-  end
-
-  defp all_t_zero_received?(ctx, state) do
-    shifter_count =
-      ctx.children
-      |> Enum.filter(fn {k, _v} -> match?({:shifter, _}, k) end)
-      |> Enum.count()
-
-    t_zero_count = Enum.count(state.shifter_state.t_zero_acc)
-    shifter_count == t_zero_count
-  end
-
   defp all_streams_ended?(ctx, ended_sinks) do
     ctx.children
     |> Map.keys()
@@ -524,6 +475,9 @@ defmodule Membrane.HLS.SinkBin do
     target_segment_duration_ms =
       Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
 
+    # TODO(optimization): we have a double safety_delay situation: packager
+    # waits three segments to write the master playlist down, and the timer
+    # there waits three iterations before ticking.
     Membrane.Time.as_milliseconds(safety_delay, :round) + target_segment_duration_ms * 3
   end
 
@@ -556,12 +510,25 @@ defmodule Membrane.HLS.SinkBin do
     offset = track_pts(state.opts.packager, track_id)
 
     Membrane.Logger.info(
-      "Adding shifter for track #{inspect(track_id)} with offset #{Float.round(offset / 1.0e9, 2)}s"
+      "Adding shifter for track #{inspect(track_id)} with offset #{inspect_timing(offset)}s"
     )
 
     child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{
       duration: offset
     })
+  end
+
+  defp register_time_observer(state, track_id, prio \\ 0) do
+    put_in(state, [:time_discovery, :candidates, track_id], prio)
+  end
+
+  defp add_track_guardrails(spec, track_id, state) do
+    # TODO: add in order
+    # - trimmer
+    # - filler
+    spec
+    |> child({:time_observer, track_id}, Membrane.HLS.TimeObserver)
+    |> maybe_add_shifter(track_id, state)
   end
 
   defp track_pts(packager, track_id) do
@@ -575,4 +542,6 @@ defmodule Membrane.HLS.SinkBin do
         0
     end
   end
+
+  defp inspect_timing(t), do: "#{Float.round(t / 1.0e9, 2)}s"
 end

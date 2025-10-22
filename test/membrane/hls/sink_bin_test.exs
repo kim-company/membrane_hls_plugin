@@ -10,8 +10,7 @@ defmodule Membrane.HLS.SinkBinTest do
     [
       child(:sink, %Membrane.HLS.SinkBin{
         packager: packager,
-        target_segment_duration: Membrane.Time.seconds(7),
-        shifter_t_zero_timeout: Membrane.Time.milliseconds(100)
+        target_segment_duration: Membrane.Time.seconds(7)
       }),
 
       # Source
