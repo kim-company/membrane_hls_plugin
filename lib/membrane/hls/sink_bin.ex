@@ -162,13 +162,23 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   @impl true
+  def handle_child_notification({:observed_time, t}, {:time_checker, track_id}, _ctx, state) do
+    Membrane.Logger.info(
+      "Observed time #{inspect_timing(t)} on track #{inspect(track_id)} after guardrails"
+    )
+
+    {[], state}
+  end
+
   def handle_child_notification(
         {:observed_time, t},
         {:time_observer, track_id},
         ctx,
         state = %{time_discovery: %{target_track: track_id}}
       ) do
-    Membrane.Logger.info("Reference time discovered: #{t}")
+    Membrane.Logger.info(
+      "Discovered reference time #{inspect_timing(t)} on track #{inspect(track_id)}}"
+    )
 
     actions =
       ctx.children
@@ -182,7 +192,10 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   def handle_child_notification({:observed_time, t}, {:time_observer, track_id}, _ctx, state) do
-    Membrane.Logger.debug("Observed time #{t} on track #{inspect(track_id)}")
+    Membrane.Logger.info(
+      "Observed time #{inspect_timing(t)} on track #{inspect(track_id)} before railguards"
+    )
+
     {[], state}
   end
 
@@ -408,7 +421,7 @@ defmodule Membrane.HLS.SinkBin do
       end
 
     Membrane.Logger.info(
-      "Deadline reset. Restoring playlist syncronization in #{Float.round(timeout / 1.0e3, 3)}s"
+      "Deadline reset. Restoring playlist syncronization in #{inspect_timing(timeout)}"
     )
 
     state = update_in(state, [:live_state, :next_deadline], fn x -> x + timeout end)
@@ -488,7 +501,7 @@ defmodule Membrane.HLS.SinkBin do
     deadline = now + timeout
 
     Membrane.Logger.info(
-      "Deadline reset. Starting playlist syncronization in #{Float.round(timeout / 1.0e3, 3)}s"
+      "Deadline reset. Starting playlist syncronization in #{inspect_timing(timeout)}"
     )
 
     live_state = %{
@@ -509,7 +522,7 @@ defmodule Membrane.HLS.SinkBin do
     offset = track_pts(state.opts.packager, track_id)
 
     Membrane.Logger.info(
-      "Adding shifter for track #{inspect(track_id)} with offset #{inspect_timing(offset)}s"
+      "Adding shifter for track #{inspect(track_id)} with offset #{inspect_timing(offset)}"
     )
 
     child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{
@@ -533,6 +546,7 @@ defmodule Membrane.HLS.SinkBin do
       end
     end)
     |> maybe_add_shifter(track_id, state)
+    |> child({:time_checker, track_id}, Membrane.HLS.TimeObserver)
   end
 
   defp track_pts(packager, track_id) do
