@@ -65,7 +65,7 @@ defmodule Membrane.HLS.Filler.Text do
     to = state.time_first_buffer
 
     filler_buffers =
-      if from < to do
+      if from < to and from > 0 do
         buffer = %Membrane.Buffer{
           payload: "",
           pts: from,
