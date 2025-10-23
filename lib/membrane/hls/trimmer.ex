@@ -35,7 +35,7 @@ defmodule Membrane.HLS.Trimmer do
   end
 
   @impl true
-  def handle_parent_notification({:time_reference, t}, ctx, state) do
+  def handle_parent_notification({:time_reference, t}, ctx, state = %{time_reference: nil}) do
     {buffers, state} =
       get_and_update_in(state, [:queue], fn q ->
         {:queue.to_list(q), :queue.new()}
@@ -52,6 +52,10 @@ defmodule Membrane.HLS.Trimmer do
       end
 
     {actions, state}
+  end
+
+  def handle_parent_notification(_, _ctx, state) do
+    {[], state}
   end
 
   defp filter_buffers(buffer_or_buffers, before) do

@@ -55,7 +55,7 @@ defmodule Membrane.HLS.Filler.AAC do
   end
 
   @impl true
-  def handle_parent_notification({:time_reference, t}, ctx, state) do
+  def handle_parent_notification({:time_reference, t}, ctx, state = %{time_reference: nil}) do
     state = put_in(state, [:time_reference], t)
 
     cond do
@@ -68,6 +68,10 @@ defmodule Membrane.HLS.Filler.AAC do
       true ->
         {[], state}
     end
+  end
+
+  def handle_parent_notification(_, _ctx, state) do
+    {[], state}
   end
 
   defp fill_and_forward(ctx, state) do
