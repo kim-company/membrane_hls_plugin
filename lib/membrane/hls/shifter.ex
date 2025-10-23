@@ -33,17 +33,25 @@ defmodule Membrane.HLS.Shifter do
   defp shift_buffer(state, buffer) do
     %{
       buffer
-      | pts: shift(buffer.pts, state),
-        dts: shift(buffer.dts, state),
+      | pts: compute_offset(buffer.pts, state),
+        dts: compute_offset(buffer.dts, state),
         metadata: update_metadata(buffer.metadata, state)
     }
   end
 
   defp update_metadata(%{to: to} = metadata, state),
-    do: %{metadata | to: shift(to, state)}
+    do: %{metadata | to: compute_offset(to, state)}
 
   defp update_metadata(metadata, _state), do: metadata
 
-  defp shift(nil, _state), do: nil
-  defp shift(t, state), do: t + state.offset
+  defp compute_delta(t, state) when state.offset >= 0, do: t - state.offset
+  # When the offset is negative we have no reason to change it, it means the
+  # stream is just started.
+  defp compute_delta(t, _state), do: t
+
+  defp compute_offset(nil, _state), do: nil
+
+  defp compute_offset(t, state) do
+    state.offset + compute_delta(t, state)
+  end
 end
