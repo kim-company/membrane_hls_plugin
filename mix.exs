@@ -4,7 +4,7 @@ defmodule Membrane.HLS.MixProject do
   def project do
     [
       app: :membrane_hls_plugin,
-      version: "2.1.1",
+      version: "2.1.2",
       elixir: "~> 1.13",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
