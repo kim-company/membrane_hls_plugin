@@ -22,36 +22,33 @@ defmodule Membrane.HLS.Shifter do
 
   @impl true
   def handle_init(_ctx, opts) do
-    {[], %{offset: opts.duration}}
+    {[], %{duration: opts.duration, offset: nil}}
   end
 
   @impl true
-  def handle_buffer(:input, buffer, _ctx, state) do
-    {[buffer: {:output, shift_buffer(state, buffer)}], state}
+  def handle_buffer(:input, buffer, _ctx, %{offset: nil} = state) do
+    state = %{state | offset: state.duration - Membrane.Buffer.get_dts_or_pts(buffer)}
+    {[buffer: {:output, shift_buffer(buffer, state)}], state}
   end
 
-  defp shift_buffer(state, buffer) do
+  def handle_buffer(:input, buffer, _ctx, state) do
+    {[buffer: {:output, shift_buffer(buffer, state)}], state}
+  end
+
+  defp shift_buffer(buffer, state) do
     %{
       buffer
-      | pts: compute_offset(buffer.pts, state),
-        dts: compute_offset(buffer.dts, state),
+      | pts: add_offset(buffer.pts, state),
+        dts: add_offset(buffer.dts, state),
         metadata: update_metadata(buffer.metadata, state)
     }
   end
 
   defp update_metadata(%{to: to} = metadata, state),
-    do: %{metadata | to: compute_offset(to, state)}
+    do: %{metadata | to: add_offset(to, state)}
 
   defp update_metadata(metadata, _state), do: metadata
 
-  defp compute_delta(t, state) when state.offset >= 0, do: t - state.offset
-  # When the offset is negative we have no reason to change it, it means the
-  # stream is just started.
-  defp compute_delta(t, _state), do: t
-
-  defp compute_offset(nil, _state), do: nil
-
-  defp compute_offset(t, state) do
-    state.offset + compute_delta(t, state)
-  end
+  defp add_offset(nil, _state), do: nil
+  defp add_offset(t, state), do: max(state.duration, t + state.offset)
 end
