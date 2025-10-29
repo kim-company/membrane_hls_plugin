@@ -27,7 +27,8 @@ defmodule Membrane.HLS.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:kim_hls, "~> 2.1"},
+      # {:kim_hls, "~> 2.1"},
+      {:kim_hls, path: "../kim_hls"},
       {:membrane_core, "~> 1.0"},
       {:membrane_file_plugin, "~> 0.17"},
       {:membrane_mp4_plugin, "~> 0.35"},

@@ -1,6 +1,5 @@
 defmodule Membrane.HLS.WebVTTSink do
   use Membrane.Sink
-  alias HLS.Packager
 
   def_input_pad(
     :input,
@@ -8,9 +7,9 @@ defmodule Membrane.HLS.WebVTTSink do
   )
 
   def_options(
-    packager: [
+    parent: [
       spec: pid(),
-      description: "PID of the packager."
+      description: "PID of the parent SinkBin that manages the packager."
     ],
     track_id: [
       spec: String.t(),
@@ -27,7 +26,7 @@ defmodule Membrane.HLS.WebVTTSink do
 
   @impl true
   def handle_init(_context, opts) do
-    {[], %{opts: opts, upload_tasks: %{}}}
+    {[], %{opts: opts}}
   end
 
   def handle_stream_format(:input, format, _ctx, state) do
@@ -37,24 +36,22 @@ defmodule Membrane.HLS.WebVTTSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    Packager.add_track(
-      state.opts.packager,
-      track_id,
+    # Send track registration to parent (no codecs for WebVTT)
+    track_opts = [
       stream: state.opts.build_stream.(format),
       segment_extension: ".vtt",
       target_segment_duration: target_segment_duration
-    )
+    ]
+
+    send(state.opts.parent, {:hls_add_track, track_id, track_opts})
 
     {[], state}
   end
 
   def handle_buffer(:input, buffer, _ctx, state) do
-    Packager.put_segment(
-      state.opts.packager,
-      state.opts.track_id,
-      buffer.payload,
-      Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
-    )
+    # Send segment to parent
+    duration = Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
+    send(state.opts.parent, {:hls_segment, state.opts.track_id, buffer.payload, duration})
 
     {[], state}
   end

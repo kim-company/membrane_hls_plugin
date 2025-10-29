@@ -1,6 +1,5 @@
 defmodule Membrane.HLS.PackedAACSink do
   use Membrane.Sink
-  alias HLS.Packager
   require Membrane.Logger
 
   def_input_pad(:input,
@@ -8,9 +7,9 @@ defmodule Membrane.HLS.PackedAACSink do
   )
 
   def_options(
-    packager: [
+    parent: [
       spec: pid(),
-      description: "PID of the packager."
+      description: "PID of the parent SinkBin that manages the packager."
     ],
     track_id: [
       spec: String.t(),
@@ -50,26 +49,24 @@ defmodule Membrane.HLS.PackedAACSink do
 
     codecs = Membrane.HLS.serialize_codecs(info)
 
-    Packager.add_track(
-      state.opts.packager,
-      track_id,
+    # Send track registration to parent
+    track_opts = [
       codecs: codecs,
       stream: stream,
       segment_extension: ".aac",
       target_segment_duration: target_segment_duration
-    )
+    ]
+
+    send(state.opts.parent, {:hls_add_track, track_id, track_opts})
 
     {[], state}
   end
 
   @impl true
   def handle_buffer(:input, buffer, _ctx, state) do
-    Packager.put_segment(
-      state.opts.packager,
-      state.opts.track_id,
-      buffer.payload,
-      Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
-    )
+    # Send segment to parent
+    duration = Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
+    send(state.opts.parent, {:hls_segment, state.opts.track_id, buffer.payload, duration})
 
     {[], state}
   end

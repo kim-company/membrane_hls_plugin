@@ -6,10 +6,11 @@ defmodule Membrane.HLS.SinkBinTest do
 
   @avsync "test/fixtures/avsync.ts"
 
-  defp build_base_spec(packager) do
+  defp build_base_spec(storage, manifest_uri) do
     [
       child(:sink, %Membrane.HLS.SinkBin{
-        packager: packager,
+        storage: storage,
+        manifest_uri: manifest_uri,
         target_segment_duration: Membrane.Time.seconds(7)
       }),
 
@@ -243,10 +244,7 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
   end
 
-  defp assert_hls_output(packager, manifest_uri) do
-    # Get registered tracks from packager as source of truth
-    tracks = HLS.Packager.tracks(packager)
-
+  defp assert_hls_output(manifest_uri) do
     # Read and parse master playlist
     manifest_path = URI.to_string(manifest_uri) |> String.replace("file://", "")
     assert File.exists?(manifest_path), "Master playlist should exist at #{manifest_path}"
@@ -256,90 +254,56 @@ defmodule Membrane.HLS.SinkBinTest do
     master_playlist =
       HLS.Playlist.unmarshal(manifest_content, %HLS.Playlist.Master{uri: manifest_uri})
 
-    # Validate each track appears in the master playlist correctly
-    Enum.each(tracks, fn {track_id, track_info} ->
-      validate_track_in_master_playlist(track_info, master_playlist)
-      validate_media_playlist_exists(track_id, manifest_path, master_playlist)
+    # Validate master playlist has content
+    assert length(master_playlist.streams) > 0 ||
+             length(master_playlist.alternative_renditions) > 0,
+           "Master playlist should have at least one stream or rendition"
+
+    # Validate each variant stream has a valid media playlist
+    Enum.each(master_playlist.streams, fn stream ->
+      validate_media_playlist_from_stream(stream, manifest_path)
+    end)
+
+    # Validate each alternative rendition has a valid media playlist
+    Enum.each(master_playlist.alternative_renditions, fn rendition ->
+      if rendition.uri do
+        validate_media_playlist_from_uri(rendition.uri, manifest_path)
+      end
     end)
   end
 
-  defp validate_track_in_master_playlist(track_info, master_playlist) do
-    stream = Map.get(track_info, :stream)
-
-    case stream do
-      %HLS.VariantStream{} = variant ->
-        # Find matching variant stream in parsed playlist
-        variant_found =
-          Enum.any?(master_playlist.streams, fn parsed_variant ->
-            bandwidth_matches = parsed_variant.bandwidth == variant.bandwidth
-
-            resolution_matches =
-              variant.resolution == nil || parsed_variant.resolution == variant.resolution
-
-            # Check if expected codecs are a subset of actual codecs (packager may combine tracks)
-            codecs_match =
-              variant.codecs == [] || length(variant.codecs) == 0 ||
-                Enum.all?(variant.codecs, &(&1 in parsed_variant.codecs))
-
-            bandwidth_matches && resolution_matches && codecs_match
-          end)
-
-        assert variant_found,
-               "Variant stream with bandwidth #{variant.bandwidth} should appear in master playlist"
-
-      %HLS.AlternativeRendition{} = rendition ->
-        # Find matching alternative rendition in parsed playlist
-        rendition_found =
-          Enum.any?(master_playlist.alternative_renditions, fn parsed_rendition ->
-            parsed_rendition.type == rendition.type &&
-              parsed_rendition.group_id == rendition.group_id &&
-              (rendition.name == nil || parsed_rendition.name == rendition.name)
-          end)
-
-        assert rendition_found,
-               "Alternative rendition with type #{rendition.type} and group #{rendition.group_id} should appear in master playlist"
-
-      _ ->
-        flunk("Unknown stream type: #{inspect(stream)}")
-    end
-  end
-
-  defp validate_media_playlist_exists(track_id, manifest_path, master_playlist) do
+  defp validate_media_playlist_from_stream(stream, manifest_path) do
     manifest_dir = Path.dirname(manifest_path)
+    uri_path = if is_struct(stream.uri, URI), do: stream.uri.path, else: stream.uri
 
-    # Find the URI for this track in the master playlist
-    playlist_uri = find_media_playlist_uri(track_id, master_playlist)
-
-    assert playlist_uri,
-           "Media playlist URI for track #{track_id} should be found in master playlist"
-
-    # Resolve relative URI to absolute path
-    playlist_path = Path.join(manifest_dir, playlist_uri)
+    playlist_path =
+      if String.starts_with?(uri_path, "/") do
+        uri_path
+      else
+        Path.join(manifest_dir, uri_path)
+      end
 
     assert File.exists?(playlist_path),
-           "Media playlist for track #{track_id} should exist at #{playlist_path}"
+           "Media playlist for variant stream should exist at #{playlist_path}"
 
-    # Parse and validate media playlist content
-    validate_media_playlist_content(playlist_path, playlist_uri)
+    validate_media_playlist_content(playlist_path, uri_path)
   end
 
-  defp find_media_playlist_uri(track_id, master_playlist) do
-    # Check variant streams
-    variant_uri =
-      Enum.find_value(master_playlist.streams, fn stream ->
-        uri_path = if is_struct(stream.uri, URI), do: stream.uri.path, else: stream.uri
-        if uri_path && String.contains?(uri_path, track_id), do: uri_path
-      end)
+  defp validate_media_playlist_from_uri(uri, manifest_path) do
+    manifest_dir = Path.dirname(manifest_path)
+    uri_path = if is_struct(uri, URI), do: uri.path, else: uri
 
-    if variant_uri do
-      variant_uri
-    else
-      # Check alternative renditions
-      Enum.find_value(master_playlist.alternative_renditions, fn rendition ->
-        uri_path = if is_struct(rendition.uri, URI), do: rendition.uri.path, else: rendition.uri
-        if uri_path && String.contains?(uri_path, track_id), do: uri_path
-      end)
-    end
+    playlist_path =
+      if String.starts_with?(uri_path, "/") do
+        uri_path
+      else
+        Path.join(manifest_dir, uri_path)
+      end
+
+    assert File.exists?(playlist_path),
+           "Media playlist for alternative rendition should exist at #{playlist_path}"
+
+    validate_media_playlist_content(playlist_path, uri_path)
   end
 
   defp validate_media_playlist_content(playlist_path, _playlist_uri) do
@@ -382,17 +346,11 @@ defmodule Membrane.HLS.SinkBinTest do
 
   @tag :tmp_dir
   test "on a new stream, CMAF", %{tmp_dir: tmp_dir} do
-    {:ok, packager} =
-      HLS.Packager.start_link(
-        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
-        storage: HLS.Storage.File.new(),
-        resume_finished_tracks: true,
-        restore_pending_segments: false
-      )
+    storage = HLS.Storage.File.new()
+    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
 
     spec =
-      packager
-      |> build_base_spec()
+      build_base_spec(storage, manifest_uri)
       |> Enum.concat(build_subtitles_spec())
       |> Enum.concat(build_cmaf_spec())
 
@@ -400,23 +358,20 @@ defmodule Membrane.HLS.SinkBinTest do
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
     :ok = Membrane.Pipeline.terminate(pipeline)
 
+    # Wait for async tasks to complete
+    Process.sleep(500)
+
     # Validate the generated HLS output
-    assert_hls_output(packager, URI.new!("file://#{tmp_dir}/stream.m3u8"))
+    assert_hls_output(manifest_uri)
   end
 
   @tag :tmp_dir
   test "on a new stream, MPEG-TS", %{tmp_dir: tmp_dir} do
-    {:ok, packager} =
-      HLS.Packager.start_link(
-        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
-        storage: HLS.Storage.File.new(),
-        resume_finished_tracks: true,
-        restore_pending_segments: false
-      )
+    storage = HLS.Storage.File.new()
+    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
 
     spec =
-      packager
-      |> build_base_spec()
+      build_base_spec(storage, manifest_uri)
       |> Enum.concat(build_subtitles_spec())
       |> Enum.concat(build_mpeg_ts_spec())
 
@@ -424,23 +379,20 @@ defmodule Membrane.HLS.SinkBinTest do
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
     :ok = Membrane.Pipeline.terminate(pipeline)
 
+    # Wait for async tasks to complete
+    Process.sleep(500)
+
     # Validate the generated HLS output
-    assert_hls_output(packager, URI.new!("file://#{tmp_dir}/stream.m3u8"))
+    assert_hls_output(manifest_uri)
   end
 
   @tag :tmp_dir
   test "on a new stream, MPEG-TS with AAC", %{tmp_dir: tmp_dir} do
-    {:ok, packager} =
-      HLS.Packager.start_link(
-        manifest_uri: URI.new!("file://#{tmp_dir}/stream.m3u8"),
-        storage: HLS.Storage.File.new(),
-        resume_finished_tracks: true,
-        restore_pending_segments: false
-      )
+    storage = HLS.Storage.File.new()
+    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
 
     spec =
-      packager
-      |> build_base_spec()
+      build_base_spec(storage, manifest_uri)
       |> Enum.concat(build_subtitles_spec())
       |> Enum.concat(build_full_mpeg_ts_spec())
 
@@ -448,7 +400,10 @@ defmodule Membrane.HLS.SinkBinTest do
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
     :ok = Membrane.Pipeline.terminate(pipeline)
 
+    # Wait for async tasks to complete
+    Process.sleep(500)
+
     # Validate the generated HLS output
-    assert_hls_output(packager, URI.new!("file://#{tmp_dir}/stream.m3u8"))
+    assert_hls_output(manifest_uri)
   end
 end

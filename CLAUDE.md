@@ -27,11 +27,12 @@ This is a Membrane Framework plugin for HLS (HTTP Live Streaming) that provides 
 
 1. **Input Processing**: Each input pad specifies `encoding` (:AAC, :H264, :TEXT), `container` (:CMAF, :TS, :PACKED_AAC), and `segment_duration`
 2. **Pipeline Creation**: Based on these options, different processing chains are built:
-   - AAC → Aggregator → PackedAACSink (for PACKED_AAC)
-   - AAC → MP4.Muxer.CMAF → CMAFSink (for CMAF)
-   - H264 → MP4.Muxer.CMAF → CMAFSink (for CMAF)
-   - H264 → MPEG.TS.Muxer → Aggregator → TSSink (for TS)
-   - TEXT → WebVTT.CueBuilderFilter → WebVTT.SegmentFilter → WebVTTSink
+   - AAC + PACKED_AAC → Aggregator → PackedAACSink
+   - AAC + CMAF → MP4.Muxer.CMAF → CMAFSink
+   - AAC + TS → MPEG.TS.Muxer → Aggregator → TSSink
+   - H264 + CMAF → MP4.Muxer.CMAF → CMAFSink
+   - H264 + TS → MPEG.TS.Muxer → Aggregator → TSSink
+   - TEXT → WebVTT.Filter → WebVTT.SegmentFilter → WebVTTSink
 
 **HLS.Packager Integration**: All sink elements interact with `HLS.Packager` (from `kim_hls` dependency) which:
 - Manages playlist generation and segment metadata
@@ -40,9 +41,10 @@ This is a Membrane Framework plugin for HLS (HTTP Live Streaming) that provides 
 - Supports both live and VOD modes
 
 **Timeline Management**:
-- **Shifter Element**: For VOD playlists, shifts timestamps to maintain monotonic PTS across stream restarts
-- **Live Mode**: Uses safety delays and periodic playlist synchronization
-- **Discontinuities**: Automatically added when packager has existing tracks (stream restarts)
+- **Shifter Element**: For VOD playlists (non-sliding window), shifts timestamps to maintain monotonic PTS/DTS across stream restarts. Located at `lib/membrane/hls/shifter.ex`
+- **Live Mode**: Uses safety delays and periodic playlist synchronization with sliding windows
+- **Discontinuities**: Automatically added when packager has existing tracks (indicates stream restarts in live mode)
+- **Track Guardrails**: Filler and Trimmer elements ensure audio/video/subtitle tracks are synchronized, adding silence or trimming content to align segments across tracks
 
 ### Source Architecture
 
@@ -53,13 +55,16 @@ The `Membrane.HLS.Source` reads existing HLS streams:
 
 ### Key Patterns
 
-**Dynamic Pad Creation**: Pads are added with specific options that determine the entire processing pipeline. The `build_stream` function converts Membrane formats to HLS stream definitions.
+**Dynamic Pad Creation**: Pads are added with specific options that determine the entire processing pipeline. The `build_stream` callback function converts Membrane stream formats to HLS stream definitions (`HLS.VariantStream` for video tracks, `HLS.AlternativeRendition` for audio/subtitle tracks).
 
-**Codec Serialization**: `Membrane.HLS.serialize_codecs/1` converts codec maps to HLS codec strings (e.g., "avc1.64001f", "mp4a.40.2").
+**Codec Serialization**: `Membrane.HLS.serialize_codecs/1` in `lib/membrane/hls.ex` converts codec maps to HLS codec strings:
+- avc1 (H.264): `"avc1.{profile}{compatibility}{level}"` (e.g., "avc1.64001f")
+- hvc1 (H.265): `"hvc1.{profile}.4.L{level}.B0"`
+- mp4a (AAC): `"mp4a.40.{aot_id}"` (e.g., "mp4a.40.2")
 
-**Application Supervision**: The plugin starts supervisors for tracker and task management, enabling concurrent segment processing and playlist monitoring.
+**Application Supervision**: The plugin starts an OTP application (`Membrane.HLS.Application`) with supervisors for tracker and task management, enabling concurrent segment processing and playlist monitoring.
 
-**Container Format Flexibility**: The same input stream can be packaged into different containers (CMAF, TS, Packed AAC) by changing pad options, each with optimized processing chains.
+**Container Format Flexibility**: The same input stream can be packaged into different containers (CMAF, TS, Packed AAC) by changing the `container` option in pad options, each with optimized processing chains.
 
 ### Testing Patterns
 

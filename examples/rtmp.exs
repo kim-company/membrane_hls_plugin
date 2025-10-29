@@ -15,25 +15,18 @@ defmodule Pipeline do
   def handle_init(_ctx, _opts) do
     File.rm_rf("tmp")
 
-    {:ok, packager} =
-      HLS.Packager.start_link(
-        storage: HLS.Storage.File.new(),
-        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
-        resume_finished_tracks: true,
-        restore_pending_segments: false
-      )
-
     structure = [
       # Source
       child(:source, %Membrane.RTMP.Source{
         url: "rtmp://0.0.0.0:1935/app/stream_key"
       })
       |> child(:transcoder, Membrane.FFmpeg.Transcoder),
-      
+
       # Sink
       child(:sink, %Membrane.HLS.SinkBin{
-        packager: packager,
-        target_segment_duration: Membrane.Time.seconds(7),
+        storage: HLS.Storage.File.new(),
+        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
+        target_segment_duration: Membrane.Time.seconds(7)
       }),
 
       # Audio
