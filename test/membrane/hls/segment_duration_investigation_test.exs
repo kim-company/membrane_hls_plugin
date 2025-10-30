@@ -12,7 +12,7 @@ defmodule Membrane.HLS.SegmentDurationInvestigationTest do
   with target duration, causing violations.
   """
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   use Membrane.Pipeline
 
   import Membrane.Testing.Assertions
@@ -96,9 +96,9 @@ defmodule Membrane.HLS.SegmentDurationInvestigationTest do
   describe "Segment Duration Investigation" do
     @tag :tmp_dir
     @tag timeout: 30_000
-    test "target 2s with 2s keyframes", %{tmp_dir: tmp_dir} do
-      IO.puts("\n=== Testing target_duration: 2s with h264_2s_keyframes.ts ===")
-
+    test "target 2s with 2s keyframes produces exact 2s segments", %{tmp_dir: tmp_dir} do
+      # With h264_2s_keyframes.ts (keyframes every 2s) and target_duration=2s,
+      # segments should be exactly 2.0s with no violations
       logs = capture_log(fn ->
         {spec, _manifest_uri} = build_diagnostic_pipeline(tmp_dir, @h264_2s_keyframes, 2)
         pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -107,15 +107,22 @@ defmodule Membrane.HLS.SegmentDurationInvestigationTest do
         Process.sleep(500)
       end)
 
-      # Analyze results
-      analyze_results(tmp_dir, 2, logs)
+      {:ok, content} = File.read(Path.join(tmp_dir, "stream_video.m3u8"))
+      durations = extract_segment_durations(content)
+
+      # All segments should be exactly 2.0s
+      assert Enum.all?(durations, &(&1 == 2.0)),
+             "Expected all segments to be 2.0s, got: #{inspect(durations)}"
+
+      # No RFC violations should be logged
+      refute logs =~ "[HLS RFC8216 Violation]",
+             "Should not emit RFC violations with matching target and keyframes"
     end
 
     @tag :tmp_dir
     @tag timeout: 30_000
-    test "target 4s with 2s keyframes", %{tmp_dir: tmp_dir} do
-      IO.puts("\n=== Testing target_duration: 4s with h264_2s_keyframes.ts ===")
-
+    test "target 4s with 2s keyframes produces exact 4s segments", %{tmp_dir: tmp_dir} do
+      # With 2s keyframes, a 4s target should combine 2 keyframes per segment
       logs = capture_log(fn ->
         {spec, _manifest_uri} = build_diagnostic_pipeline(tmp_dir, @h264_2s_keyframes, 4)
         pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -124,14 +131,20 @@ defmodule Membrane.HLS.SegmentDurationInvestigationTest do
         Process.sleep(500)
       end)
 
-      analyze_results(tmp_dir, 4, logs)
+      {:ok, content} = File.read(Path.join(tmp_dir, "stream_video.m3u8"))
+      durations = extract_segment_durations(content)
+
+      # All segments should be exactly 4.0s
+      assert Enum.all?(durations, &(&1 == 4.0)),
+             "Expected all segments to be 4.0s, got: #{inspect(durations)}"
+
+      refute logs =~ "[HLS RFC8216 Violation]"
     end
 
     @tag :tmp_dir
     @tag timeout: 30_000
-    test "target 6s with 2s keyframes", %{tmp_dir: tmp_dir} do
-      IO.puts("\n=== Testing target_duration: 6s with h264_2s_keyframes.ts ===")
-
+    test "target 6s with 2s keyframes produces exact 6s segments", %{tmp_dir: tmp_dir} do
+      # With 2s keyframes, a 6s target should combine 3 keyframes per segment
       logs = capture_log(fn ->
         {spec, _manifest_uri} = build_diagnostic_pipeline(tmp_dir, @h264_2s_keyframes, 6)
         pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -140,51 +153,14 @@ defmodule Membrane.HLS.SegmentDurationInvestigationTest do
         Process.sleep(500)
       end)
 
-      analyze_results(tmp_dir, 6, logs)
-    end
-  end
+      {:ok, content} = File.read(Path.join(tmp_dir, "stream_video.m3u8"))
+      durations = extract_segment_durations(content)
 
-  defp analyze_results(tmp_dir, target_seconds, logs) do
-    video_playlist_path = Path.join(tmp_dir, "stream_video.m3u8")
+      # All segments should be exactly 6.0s
+      assert Enum.all?(durations, &(&1 == 6.0)),
+             "Expected all segments to be 6.0s, got: #{inspect(durations)}"
 
-    case File.read(video_playlist_path) do
-      {:ok, content} ->
-        durations = extract_segment_durations(content)
-        target = extract_target_duration(content)
-
-        max_duration = Enum.max(durations, fn -> 0.0 end)
-        min_duration = Enum.min(durations, fn -> 0.0 end)
-        avg_duration = Enum.sum(durations) / length(durations)
-
-        IO.puts("\nRESULTS:")
-        IO.puts("  Requested target_duration: #{target_seconds}s")
-        IO.puts("  EXT-X-TARGETDURATION:      #{target}s")
-        IO.puts("  Number of segments:        #{length(durations)}")
-        IO.puts("  Min segment duration:      #{Float.round(min_duration, 3)}s")
-        IO.puts("  Max segment duration:      #{Float.round(max_duration, 3)}s")
-        IO.puts("  Avg segment duration:      #{Float.round(avg_duration, 3)}s")
-        IO.puts("  Expected segment duration: ~2.0s (based on keyframe interval)")
-
-        # Check for violations
-        violations = Enum.filter(durations, fn d -> d > target end)
-        if length(violations) > 0 do
-          IO.puts("  ⚠️  VIOLATIONS: #{length(violations)} segments exceed target")
-          IO.puts("  Violating durations: #{inspect(Enum.map(violations, &Float.round(&1, 3)))}")
-        else
-          IO.puts("  ✅ NO VIOLATIONS: All segments within target")
-        end
-
-        # Check for RFC violations in logs
-        if logs =~ "[HLS RFC8216 Violation]" do
-          IO.puts("  ⚠️  RFC violations logged")
-        else
-          IO.puts("  ✅ No RFC violations logged")
-        end
-
-        IO.puts("")
-
-      {:error, reason} ->
-        IO.puts("ERROR: Could not read playlist: #{inspect(reason)}")
+      refute logs =~ "[HLS RFC8216 Violation]"
     end
   end
 end

@@ -3,7 +3,7 @@ defmodule Membrane.HLS.OriginalFixtureTest do
   Test the original avsync.ts fixture to understand why it requires 50s target.
   """
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   use Membrane.Pipeline
 
   import Membrane.Testing.Assertions
@@ -86,9 +86,10 @@ defmodule Membrane.HLS.OriginalFixtureTest do
   describe "Original avsync.ts fixture" do
     @tag :tmp_dir
     @tag timeout: 30_000
-    test "target 2s", %{tmp_dir: tmp_dir} do
-      IO.puts("\n=== Testing avsync.ts with target_duration: 2s ===")
-
+    test "target 2s with wrong framerate causes oversized segments", %{tmp_dir: tmp_dir} do
+      # This test demonstrates the original issue: avsync.ts is 30fps but when
+      # the H264 parser is configured with 25fps (as in the original tests),
+      # segments become ~2.4s instead of 2.0s due to the 30/25 = 1.2x timing error
       logs = capture_log(fn ->
         {spec, _manifest_uri} = build_pipeline(tmp_dir, 2)
         pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -97,14 +98,22 @@ defmodule Membrane.HLS.OriginalFixtureTest do
         Process.sleep(500)
       end)
 
-      analyze_results(tmp_dir, 2, logs)
+      {:ok, content} = File.read(Path.join(tmp_dir, "stream_video_460x720.m3u8"))
+      durations = extract_segment_durations(content)
+
+      # With the wrong framerate (25fps for 30fps video), segments should exceed target
+      assert Enum.all?(durations, &(&1 > 2.0)),
+             "Expected segments to exceed 2.0s due to framerate mismatch, got: #{inspect(durations)}"
+
+      # Should log RFC violations
+      assert logs =~ "[HLS RFC8216 Violation]",
+             "Expected RFC violations to be logged"
     end
 
     @tag :tmp_dir
     @tag timeout: 30_000
-    test "target 7s", %{tmp_dir: tmp_dir} do
-      IO.puts("\n=== Testing avsync.ts with target_duration: 7s ===")
-
+    test "target 7s with wrong framerate causes oversized segments", %{tmp_dir: tmp_dir} do
+      # With 7s target and 25fps config on 30fps video, segments become ~7.2s
       logs = capture_log(fn ->
         {spec, _manifest_uri} = build_pipeline(tmp_dir, 7)
         pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -113,46 +122,14 @@ defmodule Membrane.HLS.OriginalFixtureTest do
         Process.sleep(500)
       end)
 
-      analyze_results(tmp_dir, 7, logs)
-    end
-  end
+      {:ok, content} = File.read(Path.join(tmp_dir, "stream_video_460x720.m3u8"))
+      durations = extract_segment_durations(content)
 
-  defp analyze_results(tmp_dir, target_seconds, logs) do
-    video_playlist_path = Path.join(tmp_dir, "stream_video_460x720.m3u8")
+      # Segments should exceed 7.0s due to framerate mismatch
+      assert Enum.all?(durations, &(&1 > 7.0)),
+             "Expected segments to exceed 7.0s due to framerate mismatch, got: #{inspect(durations)}"
 
-    case File.read(video_playlist_path) do
-      {:ok, content} ->
-        durations = extract_segment_durations(content)
-        target = extract_target_duration(content)
-
-        max_duration = Enum.max(durations, fn -> 0.0 end)
-        min_duration = Enum.min(durations, fn -> 0.0 end)
-        avg_duration = Enum.sum(durations) / length(durations)
-
-        IO.puts("\nRESULTS:")
-        IO.puts("  Requested target_duration: #{target_seconds}s")
-        IO.puts("  EXT-X-TARGETDURATION:      #{target}s")
-        IO.puts("  Number of segments:        #{length(durations)}")
-        IO.puts("  Min segment duration:      #{Float.round(min_duration, 3)}s")
-        IO.puts("  Max segment duration:      #{Float.round(max_duration, 3)}s")
-        IO.puts("  Avg segment duration:      #{Float.round(avg_duration, 3)}s")
-        IO.puts("  All durations: #{inspect(Enum.map(durations, &Float.round(&1, 3)))}")
-
-        violations = Enum.filter(durations, fn d -> d > target end)
-        if length(violations) > 0 do
-          IO.puts("  ⚠️  VIOLATIONS: #{length(violations)} segments exceed target")
-        else
-          IO.puts("  ✅ NO VIOLATIONS")
-        end
-
-        if logs =~ "[HLS RFC8216 Violation]" do
-          IO.puts("  ⚠️  RFC violations logged")
-        end
-
-        IO.puts("")
-
-      {:error, reason} ->
-        IO.puts("ERROR: Could not read playlist: #{inspect(reason)}")
+      assert logs =~ "[HLS RFC8216 Violation]"
     end
   end
 end

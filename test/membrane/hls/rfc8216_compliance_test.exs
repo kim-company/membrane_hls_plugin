@@ -35,8 +35,8 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
   - The implementation uses a warning-based approach: RFC violations are logged
     but do not prevent stream creation
   - Segment duration constraints depend on keyframe positioning in source media
-  - Tests use a 50s target duration to accommodate variable segment sizes from
-    the test fixture while still validating compliance mechanisms
+  - Tests use realistic target durations (2-6s) with correct framerate configuration
+    to validate production scenarios
   """
 
   use ExUnit.Case, async: true
@@ -50,7 +50,7 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
 
   # Helper to build a basic SinkBin pipeline with both audio and video
   defp build_pipeline(tmp_dir, opts \\ []) do
-    target_duration = Keyword.get(opts, :target_duration, Membrane.Time.seconds(7))
+    target_duration = Keyword.get(opts, :target_duration, Membrane.Time.seconds(6))
     storage = HLS.Storage.File.new(base_dir: tmp_dir)
     manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
 
@@ -95,7 +95,7 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :video])
       |> child(:h264_parser, %Membrane.H264.Parser{
-        generate_best_effort_timestamps: %{framerate: {25, 1}},
+        generate_best_effort_timestamps: %{framerate: {30, 1}},
         output_stream_structure: :avc1
       })
       |> via_in(Pad.ref(:input, "video_460x720"),
@@ -123,10 +123,10 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
   describe "Warning Emission - segment_exceeds_target_duration" do
     @tag :tmp_dir
     test "emits error when segment exceeds target duration", %{tmp_dir: tmp_dir} do
-      # Use a very short target duration (2s) to force violations with existing fixture
+      # Use a very short target duration (1s) to force violations (keyframes are at 2s intervals)
       logs =
         capture_log(fn ->
-          {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(2))
+          {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(1))
           pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
           assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
           :ok = Membrane.Pipeline.terminate(pipeline)
@@ -141,11 +141,11 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
 
     @tag :tmp_dir
     test "no warning when segments are within target duration", %{tmp_dir: tmp_dir} do
-      # Use a generous target duration (40s) to accommodate overshoot
+      # Use a realistic target duration (6s) - now works correctly with fixed framerate
       logs =
         capture_log(fn ->
           {spec, _manifest_uri} =
-            build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(40))
+            build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(6))
 
           pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
           assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
@@ -218,8 +218,8 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
   describe "Segment Timing Compliance" do
     @tag :tmp_dir
     test "all segments are within target duration", %{tmp_dir: tmp_dir} do
-      # Use large target (50s) - segments scale with target, so use very large value
-      {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(50))
+      # Use realistic target (6s) - now works correctly with fixed framerate
+      {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(6))
       pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
       assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
       :ok = Membrane.Pipeline.terminate(pipeline)
@@ -248,9 +248,25 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
     end
 
     @tag :tmp_dir
+    test "EXT-X-TARGETDURATION equals ceiling of max segment duration", %{tmp_dir: tmp_dir} do
+      # RFC 8216 Section 4.3.3.1: MUST be equal to ceiling of maximum segment duration
+      {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(6))
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
+      assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
+      :ok = Membrane.Pipeline.terminate(pipeline)
+
+      Process.sleep(500)
+
+      {:ok, media_content} = File.read(Path.join(tmp_dir, "stream_video_460x720.m3u8"))
+
+      # Verify the RFC requirement
+      assert_correct_target_duration(media_content)
+    end
+
+    @tag :tmp_dir
     test "segment durations are consistent", %{tmp_dir: tmp_dir} do
-      # Use large target (50s) - segments scale with target, so use very large value
-      {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(50))
+      # Use realistic target (6s) - now works correctly with fixed framerate
+      {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(6))
       pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
       assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
       :ok = Membrane.Pipeline.terminate(pipeline)
@@ -270,6 +286,63 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
         assert duration >= min_expected and duration <= max_expected,
                "Segment duration #{duration}s should be within 50% of average #{avg_duration}s for consistency"
       end)
+    end
+  end
+
+  describe "Discontinuity and Sequence Compliance" do
+    @tag :tmp_dir
+    test "discontinuity tags are properly formatted when present", %{tmp_dir: tmp_dir} do
+      # RFC 8216 Section 4.3.2.3: Discontinuity tags must be properly formatted
+      {spec, _manifest_uri} = build_pipeline(tmp_dir)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
+      assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
+      :ok = Membrane.Pipeline.terminate(pipeline)
+
+      Process.sleep(500)
+
+      {:ok, media_content} = File.read(Path.join(tmp_dir, "stream_video_460x720.m3u8"))
+
+      # Check that if discontinuities exist, they're properly formatted
+      # For VOD streams, discontinuities may or may not be present
+      if has_discontinuity?(media_content) do
+        # Discontinuity tags should be standalone (no parameters)
+        lines = String.split(media_content, "\n")
+        discontinuity_lines = Enum.filter(lines, &String.starts_with?(&1, "#EXT-X-DISCONTINUITY"))
+
+        Enum.each(discontinuity_lines, fn line ->
+          assert line == "#EXT-X-DISCONTINUITY",
+                 "Discontinuity tag should have no parameters, but was: #{line}"
+        end)
+      end
+    end
+
+    @tag :tmp_dir
+    test "VOD playlists do not require media sequence numbers", %{tmp_dir: tmp_dir} do
+      # RFC 8216 Section 4.3.3.2: Media sequence is required for live/event, optional for VOD
+      {spec, _manifest_uri} = build_pipeline(tmp_dir)
+      pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
+      assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
+      :ok = Membrane.Pipeline.terminate(pipeline)
+
+      Process.sleep(500)
+
+      {:ok, media_content} = File.read(Path.join(tmp_dir, "stream_video_460x720.m3u8"))
+
+      # Verify it's VOD
+      assert media_content =~ "#EXT-X-PLAYLIST-TYPE:VOD",
+             "Expected VOD playlist type"
+
+      # VOD playlists may or may not have media sequence
+      # If they do, it should start at 0 or 1
+      if media_content =~ "#EXT-X-MEDIA-SEQUENCE:" do
+        case Regex.run(~r/#EXT-X-MEDIA-SEQUENCE:(\d+)/, media_content) do
+          [_, seq] ->
+            seq_num = String.to_integer(seq)
+            assert seq_num >= 0,
+                   "Media sequence should be >= 0, but was #{seq_num}"
+          nil -> :ok
+        end
+      end
     end
   end
 
@@ -306,8 +379,8 @@ defmodule Membrane.HLS.RFC8216ComplianceTest do
     test "compliant CMAF stream emits no RFC warnings", %{tmp_dir: tmp_dir} do
       logs =
         capture_log(fn ->
-          # Use large target (50s) - segments scale with target, so use very large value
-          {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(50))
+          # Use realistic target (6s) - now works correctly with fixed framerate
+          {spec, _manifest_uri} = build_pipeline(tmp_dir, target_duration: Membrane.Time.seconds(6))
           pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
           assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
           :ok = Membrane.Pipeline.terminate(pipeline)

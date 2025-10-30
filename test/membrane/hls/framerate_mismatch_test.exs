@@ -8,7 +8,7 @@ defmodule Membrane.HLS.FramerateMismatchTest do
   - Target 7s → 7.2s segments (6.0 * 1.2 = 7.2)
   """
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   use Membrane.Pipeline
 
   import Membrane.Testing.Assertions
@@ -91,9 +91,9 @@ defmodule Membrane.HLS.FramerateMismatchTest do
   describe "Framerate Mismatch Hypothesis" do
     @tag :tmp_dir
     @tag timeout: 30_000
-    test "avsync.ts with WRONG framerate (25fps) causes overshoot", %{tmp_dir: tmp_dir} do
-      IO.puts("\n=== Testing avsync.ts @ 25fps (WRONG) with target 2s ===")
-
+    test "avsync.ts with WRONG framerate (25fps) causes ~2.4s segments", %{tmp_dir: tmp_dir} do
+      # avsync.ts is 30fps video, but configuring the parser with 25fps causes
+      # a 30/25 = 1.2x timing error. With target 2s, segments become ~2.4s.
       logs = capture_log(fn ->
         {spec, _} = build_pipeline(tmp_dir, 2, {25, 1})
         pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -106,16 +106,18 @@ defmodule Membrane.HLS.FramerateMismatchTest do
       durations = extract_segment_durations(content)
       max = Enum.max(durations, fn -> 0.0 end)
 
-      IO.puts("Max segment: #{Float.round(max, 3)}s")
-      IO.puts("Expected:    ~2.4s (due to 30/25 = 1.2x timing error)")
-      IO.puts("Has violations: #{logs =~ "[HLS RFC8216 Violation]"}")
+      # Expected: 2.0s * 1.2 = 2.4s
+      assert max >= 2.35 and max <= 2.45,
+             "Expected max segment ~2.4s due to framerate mismatch, got #{max}s"
+
+      assert logs =~ "[HLS RFC8216 Violation]",
+             "Expected RFC violations with wrong framerate"
     end
 
     @tag :tmp_dir
     @tag timeout: 30_000
-    test "avsync.ts with CORRECT framerate (30fps) works perfectly", %{tmp_dir: tmp_dir} do
-      IO.puts("\n=== Testing avsync.ts @ 30fps (CORRECT) with target 2s ===")
-
+    test "avsync.ts with CORRECT framerate (30fps) produces ~2.0s segments", %{tmp_dir: tmp_dir} do
+      # With the correct 30fps configuration, segments should be ~2.0s (matching keyframes)
       logs = capture_log(fn ->
         {spec, _} = build_pipeline(tmp_dir, 2, {30, 1})
         pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -128,9 +130,12 @@ defmodule Membrane.HLS.FramerateMismatchTest do
       durations = extract_segment_durations(content)
       max = Enum.max(durations, fn -> 0.0 end)
 
-      IO.puts("Max segment: #{Float.round(max, 3)}s")
-      IO.puts("Expected:    ~2.0s (correct timing)")
-      IO.puts("Has violations: #{logs =~ "[HLS RFC8216 Violation]"}")
+      # With correct framerate, max should be at or very close to 2.0s
+      assert max >= 1.95 and max <= 2.05,
+             "Expected max segment ~2.0s with correct framerate, got #{max}s"
+
+      refute logs =~ "[HLS RFC8216 Violation]",
+             "Should not have violations with correct framerate"
     end
   end
 end
