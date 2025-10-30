@@ -346,7 +346,7 @@ defmodule Membrane.HLS.SinkBinTest do
 
   @tag :tmp_dir
   test "on a new stream, CMAF", %{tmp_dir: tmp_dir} do
-    storage = HLS.Storage.File.new()
+    storage = HLS.Storage.File.new(base_dir: tmp_dir)
     manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
 
     spec =
@@ -367,7 +367,7 @@ defmodule Membrane.HLS.SinkBinTest do
 
   @tag :tmp_dir
   test "on a new stream, MPEG-TS", %{tmp_dir: tmp_dir} do
-    storage = HLS.Storage.File.new()
+    storage = HLS.Storage.File.new(base_dir: tmp_dir)
     manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
 
     spec =
@@ -388,7 +388,7 @@ defmodule Membrane.HLS.SinkBinTest do
 
   @tag :tmp_dir
   test "on a new stream, MPEG-TS with AAC", %{tmp_dir: tmp_dir} do
-    storage = HLS.Storage.File.new()
+    storage = HLS.Storage.File.new(base_dir: tmp_dir)
     manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
 
     spec =

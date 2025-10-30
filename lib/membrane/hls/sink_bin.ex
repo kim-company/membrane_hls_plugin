@@ -218,6 +218,7 @@ defmodule Membrane.HLS.SinkBin do
       pending_data: %{},
       opts: opts,
       flush: opts.flush_on_end,
+      flushed: false,
       ended_sinks: MapSet.new(),
       live_state: nil,
       live_playlist?: live_playlist?,
@@ -461,24 +462,25 @@ defmodule Membrane.HLS.SinkBin do
         |> put_in([:live_state], %{stop: true})
         |> put_in([:ended_sinks], ended_sinks)
 
-      state =
-        if state.flush do
-          {packager, actions} = Packager.flush(state.packager)
-          state = %{state | packager: packager}
-          execute_actions(state, actions)
-        else
-          state
-        end
-
-      # Wait for pending tasks to complete before finalizing
-      if map_size(state.pending_tasks) > 0 do
+      # Wait for pending tasks to complete before flushing
+      if state.flush and map_size(state.pending_tasks) > 0 do
         Membrane.Logger.info(
-          "Waiting for #{map_size(state.pending_tasks)} pending tasks before finalizing"
+          "Waiting for #{map_size(state.pending_tasks)} pending tasks before flushing"
         )
 
         state = Map.put(state, :awaiting_completion, true)
         {[], state}
       else
+        # No pending tasks, flush immediately
+        state =
+          if state.flush do
+            {packager, actions} = Packager.flush(state.packager)
+            state = %{state | packager: packager}
+            execute_actions(state, actions)
+          else
+            state
+          end
+
         {[notify_parent: {:end_of_stream, state.flush}], state}
       end
     else
@@ -494,15 +496,22 @@ defmodule Membrane.HLS.SinkBin do
   def handle_parent_notification(:flush, ctx, state) do
     if (not state.flush and all_streams_ended?(ctx, state.ended_sinks)) or
          is_nil(state.live_state) do
-      {packager, actions} = Packager.flush(state.packager)
-      state = %{state | packager: packager, flush: true}
-      state = execute_actions(state, actions)
+      state = %{state | flush: true}
 
-      # Wait for pending tasks before notifying
+      # Wait for pending tasks before flushing
       if map_size(state.pending_tasks) > 0 do
+        Membrane.Logger.info(
+          "Flush requested, waiting for #{map_size(state.pending_tasks)} pending tasks"
+        )
+
         state = Map.put(state, :awaiting_completion, true)
         {[], state}
       else
+        # No pending tasks, flush immediately
+        {packager, actions} = Packager.flush(state.packager)
+        state = %{state | packager: packager}
+        state = execute_actions(state, actions)
+
         {[notify_parent: {:end_of_stream, true}], state}
       end
     else
@@ -799,10 +808,31 @@ defmodule Membrane.HLS.SinkBin do
 
   defp check_awaiting_completion({actions, state}) do
     if Map.get(state, :awaiting_completion, false) and map_size(state.pending_tasks) == 0 do
-      Membrane.Logger.info("All pending tasks completed, finalizing stream")
-      # All tasks done, send end_of_stream notification
-      state = Map.delete(state, :awaiting_completion)
-      {actions ++ [notify_parent: {:end_of_stream, state.flush}], state}
+      # All upload/confirm tasks done, now flush if needed
+      if state.flush and not Map.get(state, :flushed, false) do
+        Membrane.Logger.info("All pending tasks completed, flushing packager")
+
+        {packager, flush_actions} = Packager.flush(state.packager)
+        state = %{state | packager: packager, flushed: true}
+        state = execute_actions(state, flush_actions)
+
+        # Flush actions may have spawned new tasks (deletes, writes), wait for them
+        if map_size(state.pending_tasks) > 0 do
+          Membrane.Logger.debug(
+            "Flush spawned #{map_size(state.pending_tasks)} tasks, waiting for completion"
+          )
+
+          {actions, state}
+        else
+          # No flush tasks, finalize
+          state = Map.delete(state, :awaiting_completion)
+          {actions ++ [notify_parent: {:end_of_stream, true}], state}
+        end
+      else
+        # Already flushed and all tasks done, finalize
+        state = Map.delete(state, :awaiting_completion)
+        {actions ++ [notify_parent: {:end_of_stream, state.flush}], state}
+      end
     else
       {actions, state}
     end
