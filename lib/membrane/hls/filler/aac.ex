@@ -1,18 +1,11 @@
 defmodule Membrane.HLS.Filler.AAC do
   use Membrane.Filter
 
-  @silent_frames %{
-    1 =>
-      <<255, 241, 12, 64, 3, 159, 252, 222, 2, 0, 76, 97, 118, 99, 54, 48, 46, 51, 49, 46, 49, 48,
-        50, 0, 2, 48, 64, 14>>,
-    2 =>
-      <<255, 241, 12, 128, 3, 223, 252, 222, 2, 0, 76, 97, 118, 99, 53, 56, 46, 57, 49, 46, 49,
-        48, 48, 0, 66, 32, 8, 193, 24, 56>>
-  }
+  @silent_frame <<255, 241, 76, 128, 3, 223, 252, 222, 2, 0, 76, 97, 118, 99, 53, 56, 46, 57, 49,
+                  46, 49, 48, 48, 0, 66, 32, 8, 193, 24, 56>>
 
   def_input_pad(:input,
-    accepted_format:
-      %Membrane.AAC{profile: :LC, channels: channels, sample_rate: 48_000} when channels in [1, 2]
+    accepted_format: %Membrane.AAC{profile: :LC, channels: 2, sample_rate: 48_000}
   )
 
   def_output_pad(:output, accepted_format: Membrane.AAC)
@@ -122,7 +115,7 @@ defmodule Membrane.HLS.Filler.AAC do
         else
           buffer = %Membrane.Buffer{
             pts: to,
-            payload: @silent_frames[stream_format.channels]
+            payload: @silent_frame
           }
 
           {[buffer], {from, to - frame_duration}}
