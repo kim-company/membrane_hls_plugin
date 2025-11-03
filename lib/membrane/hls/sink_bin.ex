@@ -467,7 +467,11 @@ defmodule Membrane.HLS.SinkBin do
   defp live_schedule_next_sync(state) do
     state =
       state
-      |> update_in([:live_state, :next_sync_point], fn x -> x + 1 end)
+      |> update_in([:live_state, :next_sync_point], fn x ->
+        # If the HLS is writing down the chunks faster than realtime,
+        # we might need to sync faster. Thats why we're calling next_syncpoint again.
+        max(x + 1, Packager.next_sync_point(state.opts.packager))
+      end)
       |> update_in([:live_state, :next_deadline], fn x ->
         x + Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
       end)
@@ -505,8 +509,6 @@ defmodule Membrane.HLS.SinkBin do
     )
 
     live_state = %{
-      # The next_sync_point is already rounded to the next segment. So we add two more segments to
-      # reach the minimum of 3 segments.
       next_sync_point: next_sync_point,
       next_deadline: deadline,
       stop: false,
