@@ -398,47 +398,6 @@ defmodule Membrane.HLS.SinkBin do
     end
   end
 
-  # TODO: shall we check that this notification is only delivered for live playlists?
-  def handle_parent_notification({:reset_deadline, _downtime}, _ctx, state = %{live_state: nil}) do
-    Membrane.Logger.debug("Initializing live state from :reset_deadline notification")
-    {[], live_init_state(state)}
-  end
-
-  def handle_parent_notification({:reset_deadline, downtime}, _ctx, state) do
-    # In case of input drops, this notification can be used to make the sink
-    # wait again as if the pipeline just restarted before trying to syncronize
-    # new playlists.
-    downtime_ms = Membrane.Time.as_milliseconds(downtime, :round)
-    sync_timeout_ms = sync_timeout(state)
-
-    timeout =
-      if downtime_ms < sync_timeout_ms do
-        # We just have to wait for the duration of the downtime to get
-        # back to the state we were before.
-        downtime_ms
-      else
-        sync_timeout_ms
-      end
-
-    Membrane.Logger.info(
-      "Deadline reset. Restoring playlist syncronization in #{inspect_timing(timeout)}"
-    )
-
-    state = update_in(state, [:live_state, :next_deadline], fn x -> x + timeout end)
-
-    state =
-      update_in(
-        state,
-        [:live_state, :timer_ref],
-        fn old_ref ->
-          Process.cancel_timer(old_ref)
-          Process.send_after(self(), :sync, state.live_state.next_deadline, abs: true)
-        end
-      )
-
-    {[], state}
-  end
-
   def handle_parent_notification(_, _ctx, state) do
     {[], state}
   end
