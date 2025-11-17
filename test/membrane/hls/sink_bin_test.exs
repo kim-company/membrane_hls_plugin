@@ -4,7 +4,7 @@ defmodule Membrane.HLS.SinkBinTest do
 
   import Membrane.Testing.Assertions
 
-  @avsync "test/fixtures/avsync.ts"
+  @avsync "test/fixtures/avsync_48k.ts"
 
   defp build_base_spec(packager) do
     [
