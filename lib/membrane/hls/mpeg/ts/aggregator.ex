@@ -59,7 +59,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
     {[], init_segment(state, buffer)}
   end
 
-  def handle_buffer(:input, buffer = %{metadata: %{pusi: true}}, _ctx, state) do
+  def handle_buffer(:input, buffer = %{metadata: %{rai: true}}, _ctx, state) do
     actual_duration = buffer.pts - state.pts
     duration = state.accumulated_offset + actual_duration
 
