@@ -15,13 +15,8 @@ defmodule Pipeline do
   def handle_init(_ctx, _opts) do
     File.rm_rf("tmp")
 
-    {:ok, packager} =
-      HLS.Packager.start_link(
-        storage: HLS.Storage.File.new(),
-        manifest_uri: URI.new!("file://tmp/stream.m3u8"),
-        resume_finished_tracks: true,
-        restore_pending_segments: false
-      )
+    storage = HLS.Storage.File.new(base_dir: "tmp")
+    manifest_uri = URI.new!("file://tmp/stream.m3u8")
 
     structure = [
       # Source
@@ -32,8 +27,10 @@ defmodule Pipeline do
       
       # Sink
       child(:sink, %Membrane.HLS.SinkBin{
-        packager: packager,
+        storage: storage,
+        manifest_uri: manifest_uri,
         target_segment_duration: Membrane.Time.seconds(7),
+        playlist_mode: :vod
       }),
 
       # Audio

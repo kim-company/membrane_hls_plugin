@@ -24,12 +24,10 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
   - AAC audio encoding  
   - Text subtitles (WebVTT format)
 
-- **Operating Modes**:
-  - **Live Mode**: Real-time streaming with sliding window playlists
-    - Configurable safety delays
-    - Automatic playlist synchronization
-    - Discontinuity handling for stream interruptions
-  - **VOD Mode**: Video-on-demand with complete playlists
+- **Operating Modes** (via `playlist_mode`):
+  - `:vod` - segments are synced as soon as the next segment group is ready
+  - `{:event, safety_delay}` - live event playlists synced on a target-duration cadence
+  - `{:sliding, max_segments, safety_delay}` - live playlists with rolling window support
 
 ### Advanced Features
 - **Codec Serialization**: Automatic codec string generation (avc1, hvc1, mp4a)
@@ -41,7 +39,7 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
 
 The plugin is built on the Membrane Framework and integrates with the `kim_hls` library for playlist management:
 
-- `Membrane.HLS.SinkBin` - Main bin for processing input streams into HLS segments
+- `Membrane.HLS.SinkBin` - Main bin for processing input streams into HLS segments (accepts `manifest_uri`, `playlist_mode`, and `HLS.Storage`)
 - `Membrane.HLS.Source` - Source element for reading HLS playlists and segments
 - Various sink implementations for different container formats
 - Automatic codec detection and stream format handling

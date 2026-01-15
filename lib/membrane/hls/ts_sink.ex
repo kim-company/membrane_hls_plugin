@@ -1,16 +1,11 @@
 defmodule Membrane.HLS.TSSink do
   use Membrane.Sink
-  alias HLS.Packager
 
   def_input_pad(:input,
     accepted_format: Membrane.RemoteStream
   )
 
   def_options(
-    packager: [
-      spec: pid(),
-      description: "PID of the packager."
-    ],
     track_id: [
       spec: String.t(),
       description: "ID of the track."
@@ -55,27 +50,29 @@ defmodule Membrane.HLS.TSSink do
           {Map.get(stream, Access.key!(:codecs), []), stream}
       end
 
-    Packager.add_track(
-      state.opts.packager,
-      track_id,
+    add_track_opts = [
       codecs: codecs,
       stream: stream,
       segment_extension: ".ts",
       target_segment_duration: target_segment_duration
-    )
+    ]
 
-    {[], state}
+    {[notify_parent: {:packager_add_track, track_id, add_track_opts}], state}
   end
 
   @impl true
   def handle_buffer(:input, buffer, _ctx, state) do
-    Packager.put_segment(
-      state.opts.packager,
-      state.opts.track_id,
-      buffer.payload,
-      Membrane.Time.as_seconds(buffer.metadata.duration) |> Ratio.to_float()
-    )
+    duration =
+      buffer.metadata.duration
+      |> Membrane.Time.as_seconds()
+      |> Ratio.to_float()
 
-    {[], state}
+    actions = [
+      notify_parent:
+        {:packager_put_segment, state.opts.track_id, buffer.payload, duration, buffer.pts,
+         Map.get(buffer, :dts)}
+    ]
+
+    {actions, state}
   end
 end
