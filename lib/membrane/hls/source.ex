@@ -1,21 +1,42 @@
 defmodule Membrane.HLS.Source do
+  @moduledoc """
+  Source element that reads a single media playlist and emits segment payloads.
+
+  ## Operation
+  - For VOD playlists (`#EXT-X-ENDLIST` or `:vod` type), segments are served
+    on demand until the playlist is exhausted, then EOS is emitted.
+  - For live/event playlists, the playlist is polled and new segments are
+    enqueued as they appear. Demand still controls when segments are downloaded
+    and sent downstream.
+
+  ## Stream format
+  This element does not parse media; it forwards raw segment payloads.
+  Callers must provide `stream_format` describing the segment container:
+  - `%Membrane.HLS.Format.MPEG{}` for MPEG-TS
+  - `%Membrane.HLS.Format.PackedAudio{}` for packed AAC
+  - `%Membrane.HLS.Format.WebVTT{}` for WebVTT
+
+  ## Notes
+  - Segment metadata (`HLS.Segment`) is attached to each buffer.
+  - `poll_interval_ms` is intended for tests; production should rely on
+    playlist target duration.
+  """
   use Membrane.Source
 
-  alias HLS.Tracker
   alias HLS.Playlist
-  alias HLS.Playlist.Master
+  alias HLS.Playlist.Media
   alias HLS.Storage
   alias Membrane.Buffer
   alias Membrane.HLS.Format
   alias Membrane.HLS.TaskSupervisor
-  alias Membrane.HLS.TrackerSupervisor
 
-  @master_check_retry_interval_ms 1_000
+  @playlist_retry_interval_ms 1_000
+  @poll_min_interval_ms 500
   require Membrane.Logger
 
   def_output_pad(:output,
     flow_control: :manual,
-    availability: :on_request,
+    availability: :always,
     accepted_format:
       %Membrane.RemoteStream{content_format: %format{}}
       when format in [Format.PackedAudio, Format.WebVTT, Format.MPEG]
@@ -24,11 +45,23 @@ defmodule Membrane.HLS.Source do
   def_options(
     storage: [
       spec: Storage.t(),
-      description: "HLS.Storage implementation used to obtain playlist's contents"
+      description: "HLS.Storage implementation used to obtain playlist contents"
     ],
-    master_playlist_uri: [
+    media_playlist_uri: [
       spec: URI.t(),
-      description: "URI of the master playlist"
+      description: "URI of the media playlist"
+    ],
+    stream_format: [
+      spec: Format.PackedAudio.t() | Format.WebVTT.t() | Format.MPEG.t(),
+      description: "Stream format describing the media playlist contents"
+    ],
+    poll_interval_ms: [
+      spec: non_neg_integer() | nil,
+      default: nil,
+      description: """
+      Optional poll interval override (milliseconds) for live playlists.
+      When nil, the target duration derived from the playlist is used.
+      """
     ]
   )
 
@@ -37,239 +70,165 @@ defmodule Membrane.HLS.Source do
     {[],
      %{
        storage: options.storage,
-       master_playlist_uri: options.master_playlist_uri,
-       pad_to_tracker: %{},
-       ref_to_pad: %{},
-       monitor_to_pad: %{}
+       media_playlist_uri: options.media_playlist_uri,
+       stream_format: options.stream_format,
+       poll_interval_ms: options.poll_interval_ms,
+       mode: nil,
+       target_duration_ms: nil,
+       next_sequence: nil,
+       pending: :queue.new(),
+       ready: :queue.new(),
+       download: nil,
+       finished: false
      }}
   end
 
   @impl true
-  def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _, state) do
-    uri = Playlist.build_absolute_uri(state.master_playlist_uri, extract_uri(rendition))
-    ref = make_ref()
-
-    {:ok, pid} =
-      DynamicSupervisor.start_child(
-        TrackerSupervisor,
-        {Tracker,
-         [
-           media_playlist_uri: uri,
-           storage: state.storage,
-           ref: ref,
-           owner: self()
-         ]}
-      )
-
-    monitor_ref = Process.monitor(pid)
-
-    config = %{
-      media_uri: uri,
-      monitor_ref: monitor_ref,
-      tracking: ref,
-      tracker: pid,
-      ready: :queue.new(),
-      pending: :queue.new(),
-      download: nil,
-      closed: false
-    }
-
-    state =
-      state
-      |> put_in([:pad_to_tracker, pad], config)
-      # When the tracker sends us messages it forwards ref. We use this mapping
-      # to retrieve the tracker.
-      |> put_in([:ref_to_pad, ref], pad)
-      # In case the tracker exits.
-      |> put_in([:monitor_to_pad, monitor_ref], pad)
-
-    {[
-       {:stream_format,
-        {pad, %Membrane.RemoteStream{content_format: build_stream_format(rendition)}}}
-     ], state}
-  end
-
-  @impl true
   def handle_playing(_ctx, state) do
-    send(self(), :check_master_playlist)
-    {[], state}
+    actions = [
+      {:stream_format, {:output, %Membrane.RemoteStream{content_format: state.stream_format}}}
+    ]
+
+    send(self(), :refresh_playlist)
+    {actions, state}
   end
 
   @impl true
-  def handle_demand(pad, _size, :buffers, _ctx, state) do
-    tracker = get_in(state, [:pad_to_tracker, pad])
-
-    # First take one ready if available.
-    {actions, tracker} =
-      get_and_update_in(tracker, [:ready], fn q ->
+  def handle_demand(:output, _size, :buffers, _ctx, state) do
+    {actions, state} =
+      get_and_update_in(state, [:ready], fn q ->
         case :queue.out(q) do
           {{:value, action}, q} -> {[action], q}
           {:empty, q} -> {[], q}
         end
       end)
 
-    {actions, tracker} =
+    {actions, state} =
       cond do
-        not is_nil(tracker.download) ->
-          # We're already downloading another segment. We can chill out.
-          {actions, tracker}
+        not is_nil(state.download) ->
+          {actions, state}
 
-        not :queue.is_empty(tracker.pending) ->
-          # The pending queue is not empty. Schedule a download.
-          {actions, schedule_download!(tracker, state.storage)}
+        not :queue.is_empty(state.pending) ->
+          {actions, schedule_download!(state, state.storage)}
 
-        not :queue.is_empty(tracker.ready) ->
-          # We have other ready segments.
-          {actions ++ [{:redemand, pad}], tracker}
+        not :queue.is_empty(state.ready) ->
+          {actions ++ [{:redemand, :output}], state}
 
-        tracker.closed ->
-          # Everything is out and the tracker is not going to provide
-          # more segments. Time to close.
-          {actions ++ [{:end_of_stream, pad}], tracker}
+        state.finished ->
+          {actions ++ [{:end_of_stream, :output}], state}
 
         true ->
-          # We're waiting for more segments from the tracker.
-          {actions, tracker}
+          {actions, state}
       end
-
-    state = put_in(state, [:pad_to_tracker, pad], tracker)
 
     {actions, state}
   end
 
   @impl true
-  def handle_info(
-        :check_master_playlist,
-        _ctx,
-        state = %{storage: storage, master_playlist_uri: uri}
-      ) do
-    case Storage.get(storage, uri) do
+  def handle_info(:refresh_playlist, _ctx, state) do
+    case Storage.get(state.storage, state.media_playlist_uri) do
       {:ok, data} ->
-        playlist = Playlist.unmarshal(data, %Master{uri: uri})
-        {[{:notify_parent, {:hls_master_playlist, playlist}}], state}
+        playlist = Playlist.unmarshal(data, %Media{uri: state.media_playlist_uri})
+        {actions, state} = handle_playlist_update(playlist, state)
+        {actions, schedule_next_refresh(state)}
 
       {:error, reason} ->
-        Membrane.Logger.warning("Master playlist check failed: #{inspect(reason)}")
+        Membrane.Logger.warning("Media playlist check failed: #{inspect(reason)}")
 
         Membrane.Logger.warning(
-          "Master playlist check attempt scheduled in #{@master_check_retry_interval_ms}ms"
+          "Media playlist check attempt scheduled in #{@playlist_retry_interval_ms}ms"
         )
 
-        Process.send_after(self(), :check_master_playlist, @master_check_retry_interval_ms)
+        Process.send_after(self(), :refresh_playlist, @playlist_retry_interval_ms)
         {[], state}
     end
   end
 
-  def handle_info({:segment, ref, segment}, _ctx, state) do
-    Membrane.Logger.debug("HLS segment received on #{inspect(ref)}: #{to_string(segment.uri)}")
-    pad = Map.fetch!(state.ref_to_pad, ref)
-
-    # We're not downloading the segment, we're only putting it into the pending
-    # queue. Download will be triggered when the segment is demanded. This allows
-    # to download a VOD playlist in a controlled fashion.
-    state =
-      update_in(state, [:pad_to_tracker, pad, :pending], fn q ->
-        :queue.in(segment, q)
-      end)
-
-    {[{:redemand, pad}], state}
-  end
-
   def handle_info({task_ref, {:segment, {:data, binary}}}, _ctx, state) do
-    # The task succeed so we can cancel the monitoring and discard the DOWN message
     Process.demonitor(task_ref, [:flush])
-    pad = find_pad_by_download_ref(task_ref, state)
-    tracker = get_in(state, [:pad_to_tracker, pad])
-    action = {:buffer, {pad, %Buffer{payload: binary, metadata: tracker.download.segment}}}
+    action = {:buffer, {:output, %Buffer{payload: binary, metadata: state.download.segment}}}
 
     state =
       state
-      |> update_in([:pad_to_tracker, pad, :ready], fn q -> :queue.in(action, q) end)
-      |> put_in([:pad_to_tracker, pad, :download], nil)
+      |> update_in([:ready], fn q -> :queue.in(action, q) end)
+      |> put_in([:download], nil)
 
-    {[{:redemand, pad}], state}
+    {[{:redemand, :output}], state}
   end
 
-  def handle_info({:DOWN, task_ref, _, _, reason}, _ctx, state) do
-    # This could either be a download message or a tracker.
-    cond do
-      Map.has_key?(state.monitor_to_pad, task_ref) ->
-        pad = get_in(state, [:monitor_to_pad, task_ref])
-
-        raise RuntimeError,
-              "Tracker for pad #{inspect(pad)} exited with reason: #{inspect(reason)}"
-
-      true ->
-        # In this case, is is a download task.
-        pad = find_pad_by_download_ref(task_ref, state)
-
-        Membrane.Logger.warning(
-          "HLS could not get next segment for pad #{inspect(pad)}: #{inspect(reason)}"
-        )
-
-        state = put_in(state, [:pad_to_tracker, pad, :download], nil)
-        {[{:redemand, pad}], state}
-    end
+  def handle_info({:DOWN, _task_ref, _, _, reason}, _ctx, state) do
+    Membrane.Logger.warning("HLS could not get next segment: #{inspect(reason)}")
+    state = put_in(state, [:download], nil)
+    {[{:redemand, :output}], state}
   end
 
-  def handle_info({:start_of_track, _ref, _next_sequence}, _ctx, state) do
-    {[], state}
-  end
-
-  def handle_info({:end_of_track, ref}, _ctx, state) do
-    # Note that the tracker process is going to exit at this point.
-    Membrane.Logger.debug("HLS end_of_track received on #{inspect(ref)}")
-
-    pad = Map.fetch!(state.ref_to_pad, ref)
-    monitor_ref = get_in(state, [:pad_to_tracker, pad, :monitor_ref])
-    # Avoid receiving the exit message, even though we should not receive
-    # it anyway in case it goes down with :normal reason.
-    Process.demonitor(monitor_ref, [:flush])
-
-    state = put_in(state, [:pad_to_tracker, pad, :closed], true)
-    {[{:redemand, pad}], state}
-  end
-
-  defp find_pad_by_download_ref(task_ref, state) do
-    {pad, _tracker} =
-      Enum.find(
-        state.pad_to_tracker,
-        {nil, nil},
-        fn {_pad, tracker} ->
-          tracker.download != nil and tracker.download.task_ref == task_ref
-        end
-      )
-
-    pad
-  end
-
-  defp schedule_download!(%{download: nil, media_uri: media_uri} = tracker, storage) do
-    {{:value, segment}, queue} = :queue.out(tracker.pending)
+  defp schedule_download!(%{download: nil, media_playlist_uri: media_uri} = state, storage) do
+    {{:value, segment}, queue} = :queue.out(state.pending)
 
     task =
       Task.Supervisor.async_nolink(TaskSupervisor, fn ->
-        uri = Playlist.build_absolute_uri(media_uri, segment.uri)
+        uri = Media.build_segment_uri(media_uri, segment.uri)
         Membrane.Logger.debug("Getting segment: #{to_string(uri)}")
 
         case Storage.get(storage, uri) do
           {:ok, data} -> {:segment, {:data, data}}
-          {:error, reason} -> raise RuntimeError, reason
+          {:error, reason} -> raise RuntimeError, "Storage.get failed: #{inspect(reason)}"
         end
       end)
 
-    %{tracker | pending: queue, download: %{task_ref: task.ref, segment: segment}}
+    %{state | pending: queue, download: %{task_ref: task.ref, segment: segment}}
   end
 
-  defp extract_uri(%HLS.AlternativeRendition{uri: uri}), do: uri
-  defp extract_uri(%HLS.VariantStream{uri: uri}), do: uri
+  defp handle_playlist_update(%Media{} = playlist, state) do
+    mode =
+      state.mode ||
+        if playlist.finished or playlist.type == :vod do
+          :vod
+        else
+          :live
+        end
 
-  defp build_stream_format(%HLS.VariantStream{codecs: codecs}), do: %Format.MPEG{codecs: codecs}
+    next_sequence = state.next_sequence || playlist.media_sequence_number
+    start_sequence = max(next_sequence, playlist.media_sequence_number)
 
-  defp build_stream_format(%HLS.AlternativeRendition{type: :subtitles, language: lang}),
-    do: %Format.WebVTT{language: lang}
+    new_segments =
+      playlist.segments
+      |> Enum.filter(&(&1.absolute_sequence >= start_sequence))
 
-  defp build_stream_format(%HLS.AlternativeRendition{type: :audio}), do: %Format.PackedAudio{}
+    next_sequence =
+      case List.last(new_segments) do
+        nil -> start_sequence
+        segment -> segment.absolute_sequence + 1
+      end
 
-  defp build_stream_format(rendition),
-    do: raise(ArgumentError, "Unable to provide a proper cap for rendition #{inspect(rendition)}")
+    state =
+      state
+      |> update_in([:pending], fn q ->
+        Enum.reduce(new_segments, q, fn segment, acc -> :queue.in(segment, acc) end)
+      end)
+      |> Map.merge(%{
+        mode: mode,
+        finished: playlist.finished,
+        next_sequence: next_sequence,
+        target_duration_ms: playlist.target_segment_duration * 1_000
+      })
+
+    actions = if new_segments == [], do: [], else: [{:redemand, :output}]
+    {actions, state}
+  end
+
+  defp schedule_next_refresh(state) do
+    case {state.mode, state.finished} do
+      {:live, false} ->
+        interval =
+          state.poll_interval_ms ||
+            max(state.target_duration_ms || @poll_min_interval_ms, @poll_min_interval_ms)
+
+        _ref = Process.send_after(self(), :refresh_playlist, interval)
+        state
+
+      _other ->
+        state
+    end
+  end
 end

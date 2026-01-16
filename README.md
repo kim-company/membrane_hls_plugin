@@ -5,8 +5,9 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
 
 ## Features
 
-### Source Element
-- Reads existing HLS streams from master playlists
+### Source Elements
+- `Membrane.HLS.Source` reads a single media playlist (VOD or live/event) and emits raw segment payloads
+- `Membrane.HLS.SourceBin` reads a master playlist and exposes renditions as dynamic output pads
 - Supports multiple renditions (video, audio, subtitles)
 - Handles dynamic playlist updates for live streams
 - Built-in storage abstraction for different backends
@@ -49,7 +50,14 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
 The plugin is built on the Membrane Framework and integrates with the `kim_hls` library for playlist management:
 
 - `Membrane.HLS.SinkBin` - Main bin for processing input streams into HLS segments (accepts `manifest_uri`, `playlist_mode`, and `HLS.Storage`)
-- `Membrane.HLS.Source` - Source element for reading HLS playlists and segments
+- `Membrane.HLS.Source` - Source element for a single media playlist
+- `Membrane.HLS.SourceBin` - Bin wrapper that discovers renditions from a master playlist
+
+### Source Behavior
+- `Membrane.HLS.Source` is demand-driven for VOD playlists and polls live/event playlists for new segments.
+- Segment payloads are forwarded as-is; callers provide `stream_format` to describe the container.
+- `Membrane.HLS.SourceBin` handles master playlist discovery and spins up one `Membrane.HLS.Source`
+  per rendition, emitting them via dynamic output pads.
 - Various sink implementations for different container formats
 - Automatic codec detection and stream format handling
 
