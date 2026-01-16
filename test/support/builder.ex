@@ -1,21 +1,29 @@
-defmodule Membrane.HLS.SinkBinTest do
-  use ExUnit.Case, async: true
-  use Membrane.Pipeline
+defmodule Support.Builder do
+  import Membrane.ChildrenSpec
+  import ExUnit.Assertions
 
-  import Membrane.Testing.Assertions
+  alias Membrane.Pad
+
+  require Pad
 
   @avsync "test/fixtures/avsync_48k.ts"
 
-  defp build_base_spec(manifest_uri, storage) do
+  def avsync_fixture, do: @avsync
+
+  def build_base_spec(manifest_uri, storage, opts \\ []) do
+    playlist_mode = Keyword.get(opts, :playlist_mode, :vod)
+    target_segment_duration = Keyword.get(opts, :target_segment_duration, Membrane.Time.seconds(7))
+    flush_on_end = Keyword.get(opts, :flush_on_end, true)
+
     [
       child(:sink, %Membrane.HLS.SinkBin{
         storage: storage,
         manifest_uri: manifest_uri,
-        target_segment_duration: Membrane.Time.seconds(7),
-        playlist_mode: :vod
+        target_segment_duration: target_segment_duration,
+        playlist_mode: playlist_mode,
+        flush_on_end: flush_on_end
       }),
 
-      # Source
       child(:source, %Membrane.File.Source{
         location: @avsync
       })
@@ -23,15 +31,7 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
   end
 
-  defp make_cue_buffer(from, to, text) do
-    %Membrane.Buffer{
-      payload: text,
-      pts: Membrane.Time.milliseconds(from),
-      metadata: %{to: Membrane.Time.milliseconds(to)}
-    }
-  end
-
-  defp build_subtitles_spec() do
+  def build_subtitles_spec() do
     [
       child(:text_source, %Membrane.Testing.Source{
         stream_format: %Membrane.Text{},
@@ -65,7 +65,7 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
   end
 
-  defp build_cmaf_spec() do
+  def build_cmaf_spec() do
     [
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :audio])
@@ -120,10 +120,7 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
   end
 
-  defp build_mpeg_ts_spec() do
-    # %{mp4a: %{channels: 2, aot_id: 2, frequency: 44100}}
-    # %{avc1: %{profile: 100, level: 31, compatibility: 0}}
-
+  def build_mpeg_ts_spec() do
     [
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :audio])
@@ -183,10 +180,7 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
   end
 
-  defp build_full_mpeg_ts_spec() do
-    # %{mp4a: %{channels: 2, aot_id: 2, frequency: 44100}}
-    # %{avc1: %{profile: 100, level: 31, compatibility: 0}}
-
+  def build_full_mpeg_ts_spec() do
     [
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :audio])
@@ -246,8 +240,112 @@ defmodule Membrane.HLS.SinkBinTest do
     ]
   end
 
-  defp assert_hls_output(manifest_uri) do
-    # Read and parse master playlist
+  def assert_hls_output(manifest_uri) do
+    {manifest_path, master_playlist} = load_master_playlist(manifest_uri)
+
+    (master_playlist.streams ++ master_playlist.alternative_renditions)
+    |> Enum.each(fn stream ->
+      case Map.get(stream, :uri) do
+        nil -> :ok
+        uri -> validate_media_playlist_exists(uri, manifest_path)
+      end
+    end)
+  end
+
+  def assert_event_output(manifest_uri, opts \\ []) do
+    assert_hls_output(manifest_uri)
+
+    allow_vod = Keyword.get(opts, :allow_vod, false)
+    media_playlists = load_media_playlists(manifest_uri)
+
+    Enum.each(media_playlists, fn media ->
+      type_ok? =
+        case media.type do
+          :event -> true
+          :vod -> allow_vod
+          _ -> false
+        end
+
+      assert type_ok?, "Media playlist should be EVENT type"
+
+      Enum.each(media.segments, fn segment ->
+        assert segment.program_date_time != nil,
+               "Segment should include EXT-X-PROGRAM-DATE-TIME"
+      end)
+    end)
+  end
+
+  def load_media_playlists(manifest_uri) do
+    {manifest_path, master_playlist} = load_master_playlist(manifest_uri)
+    manifest_dir = Path.dirname(manifest_path)
+
+    (master_playlist.streams ++ master_playlist.alternative_renditions)
+    |> Enum.reduce([], fn stream, acc ->
+      case Map.get(stream, :uri) do
+        nil ->
+          acc
+
+        uri ->
+          uri_path = if is_struct(uri, URI), do: uri.path, else: uri
+          playlist_path = Path.join(manifest_dir, uri_path)
+          playlist_content = File.read!(playlist_path)
+
+          media_playlist =
+            HLS.Playlist.unmarshal(
+              playlist_content,
+              %HLS.Playlist.Media{uri: URI.new!("file://#{playlist_path}")}
+            )
+
+          [media_playlist | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def assert_program_date_time_alignment(manifest_uri, tolerance_ms) do
+    media_playlists = load_media_playlists(manifest_uri)
+
+    sequence_sets =
+      media_playlists
+      |> Enum.map(fn media ->
+        media.segments
+        |> Enum.map(& &1.absolute_sequence)
+        |> MapSet.new()
+      end)
+
+    common_sequences =
+      case sequence_sets do
+        [] -> MapSet.new()
+        [first | rest] -> Enum.reduce(rest, first, &MapSet.intersection/2)
+      end
+
+    Enum.each(common_sequences, fn seq ->
+      datetimes =
+        Enum.map(media_playlists, fn media ->
+          segment = Enum.find(media.segments, &(&1.absolute_sequence == seq))
+          segment.program_date_time
+        end)
+
+      [first | rest] = datetimes
+
+      max_diff_ms =
+        Enum.map(rest, fn dt -> abs(DateTime.diff(dt, first, :millisecond)) end)
+        |> Enum.max(fn -> 0 end)
+
+      assert max_diff_ms <= tolerance_ms,
+             "EXT-X-PROGRAM-DATE-TIME drift exceeds tolerance at sequence #{seq}"
+    end)
+  end
+
+  defp make_cue_buffer(from, to, text) do
+    %Membrane.Buffer{
+      payload: text,
+      pts: Membrane.Time.milliseconds(from),
+      metadata: %{to: Membrane.Time.milliseconds(to)}
+    }
+  end
+
+  defp load_master_playlist(manifest_uri) do
     manifest_path = URI.to_string(manifest_uri) |> String.replace("file://", "")
     assert File.exists?(manifest_path), "Master playlist should exist at #{manifest_path}"
 
@@ -256,14 +354,7 @@ defmodule Membrane.HLS.SinkBinTest do
     master_playlist =
       HLS.Playlist.unmarshal(manifest_content, %HLS.Playlist.Master{uri: manifest_uri})
 
-    # Validate each referenced media playlist exists
-    (master_playlist.streams ++ master_playlist.alternative_renditions)
-    |> Enum.each(fn stream ->
-      case Map.get(stream, :uri) do
-        nil -> :ok
-        uri -> validate_media_playlist_exists(uri, manifest_path)
-      end
-    end)
+    {manifest_path, master_playlist}
   end
 
   defp validate_media_playlist_exists(playlist_uri, manifest_path) do
@@ -281,24 +372,20 @@ defmodule Membrane.HLS.SinkBinTest do
     playlist_content = File.read!(playlist_path)
     playlist_dir = Path.dirname(playlist_path)
 
-    # Parse the media playlist using HLS.Playlist
     media_uri = URI.new!("file://#{playlist_path}")
     media_playlist = HLS.Playlist.unmarshal(playlist_content, %HLS.Playlist.Media{uri: media_uri})
 
-    # Validate basic playlist properties
     assert media_playlist.version > 0, "Media playlist should have a valid version"
 
     assert media_playlist.target_segment_duration > 0,
            "Media playlist should have a target segment duration"
 
-    # Validate segments exist
     if Enum.empty?(media_playlist.segments) do
       :ok
     else
       assert length(media_playlist.segments) > 0,
              "Media playlist should contain at least one segment"
 
-      # Check each segment file exists
       Enum.each(media_playlist.segments, fn segment ->
         segment_uri_path = if is_struct(segment.uri, URI), do: segment.uri.path, else: segment.uri
 
@@ -312,70 +399,9 @@ defmodule Membrane.HLS.SinkBinTest do
         assert File.exists?(segment_path),
                "Segment file should exist: #{segment_path}"
 
-        # Check segment file is not empty
         assert File.stat!(segment_path).size > 0,
                "Segment file should not be empty: #{segment_path}"
       end)
     end
-  end
-
-  @tag :tmp_dir
-  test "on a new stream, CMAF", %{tmp_dir: tmp_dir} do
-    storage = HLS.Storage.File.new(base_dir: tmp_dir)
-
-    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
-
-    spec =
-      manifest_uri
-      |> build_base_spec(storage)
-      |> Enum.concat(build_subtitles_spec())
-      |> Enum.concat(build_cmaf_spec())
-
-    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
-    assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
-    :ok = Membrane.Pipeline.terminate(pipeline)
-
-    # Validate the generated HLS output
-    assert_hls_output(manifest_uri)
-  end
-
-  @tag :tmp_dir
-  test "on a new stream, MPEG-TS", %{tmp_dir: tmp_dir} do
-    storage = HLS.Storage.File.new(base_dir: tmp_dir)
-
-    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
-
-    spec =
-      manifest_uri
-      |> build_base_spec(storage)
-      |> Enum.concat(build_subtitles_spec())
-      |> Enum.concat(build_mpeg_ts_spec())
-
-    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
-    assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
-    :ok = Membrane.Pipeline.terminate(pipeline)
-
-    # Validate the generated HLS output
-    assert_hls_output(manifest_uri)
-  end
-
-  @tag :tmp_dir
-  test "on a new stream, MPEG-TS with AAC", %{tmp_dir: tmp_dir} do
-    storage = HLS.Storage.File.new(base_dir: tmp_dir)
-
-    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
-
-    spec =
-      manifest_uri
-      |> build_base_spec(storage)
-      |> Enum.concat(build_subtitles_spec())
-      |> Enum.concat(build_full_mpeg_ts_spec())
-
-    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
-    assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
-    :ok = Membrane.Pipeline.terminate(pipeline)
-
-    # Validate the generated HLS output
-    assert_hls_output(manifest_uri)
   end
 end

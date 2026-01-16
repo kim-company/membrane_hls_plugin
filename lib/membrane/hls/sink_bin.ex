@@ -139,9 +139,7 @@ defmodule Membrane.HLS.SinkBin do
         storage: opts.storage,
         flush: opts.flush_on_end,
         ended_sinks: MapSet.new(),
-        live_state: nil,
-        live_playlist?: false,
-        playlist_mode: opts.playlist_mode,
+        mode: build_mode(opts),
         expected_tracks: MapSet.new(),
         time_discovery: %{
           candidates: %{},
@@ -159,7 +157,7 @@ defmodule Membrane.HLS.SinkBin do
     state = %{
       state
       | packager: packager,
-        live_playlist?: not is_nil(packager.max_segments)
+        mode: update_mode_after_setup(state.mode, packager)
     }
 
     {actions, state}
@@ -169,14 +167,21 @@ defmodule Membrane.HLS.SinkBin do
   def handle_playing(_ctx, state) do
     # We need to discover the time we're going to use as reference. If we have video,
     # we're using it. If only audio/subtitles tracks are present, we're using one of those.
-    {track_id, _} =
-      state.time_discovery.candidates
-      |> Enum.sort(fn {_, left}, {_, right} -> left > right end)
-      |> List.first()
+    case state.time_discovery.candidates do
+      candidates when map_size(candidates) > 0 ->
+        {track_id, _} =
+          candidates
+          |> Enum.sort(fn {_, left}, {_, right} -> left > right end)
+          |> List.first()
 
-    Membrane.Logger.info("Time reference will be obtained from track #{inspect(track_id)}")
-    state = put_in(state, [:time_discovery, :target_track], track_id)
-    {[], state}
+        Membrane.Logger.info("Time reference will be obtained from track #{inspect(track_id)}")
+        state = put_in(state, [:time_discovery, :target_track], track_id)
+        {[], state}
+
+      _ ->
+        Membrane.Logger.warning("Time reference candidates not available at playback start")
+        {[], state}
+    end
   end
 
   @impl true
@@ -186,6 +191,29 @@ defmodule Membrane.HLS.SinkBin do
     )
 
     {[], state}
+  end
+
+  def handle_child_notification(
+        {:observed_time, t},
+        {:time_observer, track_id},
+        ctx,
+        state = %{time_discovery: %{target_track: nil}}
+      ) do
+    Membrane.Logger.info(
+      "Discovered reference time #{inspect_timing(t)} on track #{inspect(track_id)}}"
+    )
+
+    actions =
+      ctx.children
+      |> Enum.filter(fn
+        {{x, _track_id}, _info} when x in [:trimmer, :filler] -> true
+        _ -> false
+      end)
+      |> Enum.map(fn {k, _} -> {:notify_child, {k, {:time_reference, t}}} end)
+
+    state = put_in(state, [:time_discovery, :target_track], track_id)
+
+    {actions, state}
   end
 
   def handle_child_notification(
@@ -258,22 +286,13 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   @impl true
-  def handle_element_start_of_stream(
-        child = {:muxer, _},
-        _pad,
-        _ctx,
-        state = %{live_state: nil, playlist_mode: playlist_mode}
-      ) do
-    if live_mode?(playlist_mode) do
+  def handle_element_start_of_stream(child, _pad, _ctx, state = %{mode: mode}) do
+    if live_mode?(mode) and is_nil(mode_sync_state(mode)) do
       Membrane.Logger.debug("Initializing live state: triggering child: #{inspect(child)}")
       {[], live_init_state(state)}
     else
       {[], state}
     end
-  end
-
-  def handle_element_start_of_stream(_child, _pad, _ctx, state) do
-    {[], state}
   end
 
   @impl true
@@ -457,7 +476,8 @@ defmodule Membrane.HLS.SinkBin do
     if all_streams_ended?(ctx, ended_sinks) do
       state =
         state
-        |> put_in([:live_state], %{stop: true})
+        |> drain_sync_on_end()
+        |> maybe_stop_sync_on_end()
         |> put_in([:ended_sinks], ended_sinks)
 
       state = if state.flush, do: flush_packager(state), else: state
@@ -472,10 +492,53 @@ defmodule Membrane.HLS.SinkBin do
     {[], state}
   end
 
+  defp maybe_stop_sync_on_end(state) do
+    case mode_sync_state(state.mode) do
+      nil ->
+        state
+
+      sync_state ->
+        if live_mode?(state.mode) do
+          if sync_state.timer_ref do
+            Process.cancel_timer(sync_state.timer_ref)
+          end
+
+          update_state_sync_state(state, %{sync_state | stop: true, timer_ref: nil})
+        else
+          state
+        end
+    end
+  end
+
+  defp drain_sync_on_end(state) do
+    if live_mode?(state.mode) and not state.flush do
+      drain_sync(state)
+    else
+      state
+    end
+  end
+
+  defp drain_sync(state) do
+    sync_point = Packager.next_sync_point(state.packager)
+    {ready?, _lagging} = Packager.sync_ready?(state.packager, sync_point)
+
+    if ready? do
+      state = sync_packager(state, sync_point)
+
+      if Packager.next_sync_point(state.packager) == sync_point do
+        state
+      else
+        drain_sync(state)
+      end
+    else
+      state
+    end
+  end
+
   @impl true
   def handle_parent_notification(:flush, ctx, state) do
     if (not state.flush and all_streams_ended?(ctx, state.ended_sinks)) or
-         is_nil(state.live_state) do
+         is_nil(mode_sync_state(state.mode)) do
       state =
         state
         |> Map.put(:flush, true)
@@ -492,16 +555,24 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   @impl true
-  def handle_info(:sync, _ctx, state = %{live_state: %{stop: true}}) do
-    {[], state}
-  end
-
   def handle_info(:sync, _ctx, state) do
-    Membrane.Logger.debug("Packager: syncing playlists up to #{state.live_state.next_sync_point}")
+    case mode_sync_state(state.mode) do
+      nil ->
+        {[], state}
 
-    state = sync_packager(state, state.live_state.next_sync_point)
+      sync_state ->
+        if sync_state_stopped?(state.mode) do
+          {[], state}
+        else
+          Membrane.Logger.debug(
+            "Packager: syncing playlists up to #{sync_state.next_sync_point}"
+          )
 
-    {[], live_schedule_next_sync(state)}
+          state = sync_packager(state, sync_state.next_sync_point)
+
+          {[], live_schedule_next_sync(state)}
+        end
+    end
   end
 
   defp all_streams_ended?(ctx, ended_sinks) do
@@ -513,12 +584,7 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   defp init_packager(opts, storage) do
-    max_segments =
-      case opts.playlist_mode do
-        :vod -> nil
-        {:event, _safety_delay} -> nil
-        {:sliding, max_segments, _safety_delay} -> max_segments
-      end
+    max_segments = mode_max_segments(opts.playlist_mode)
 
     if opts.resume? do
       case resume_packager(opts, storage, max_segments) do
@@ -622,36 +688,87 @@ defmodule Membrane.HLS.SinkBin do
     end
   end
 
-  defp live_mode?(:vod), do: false
-  defp live_mode?({:event, _safety_delay}), do: true
-  defp live_mode?({:sliding, _max_segments, _safety_delay}), do: true
+  defp build_mode(opts) do
+    case opts.playlist_mode do
+      :vod ->
+        {:vod, %{}}
 
-  defp live_safety_delay({:event, safety_delay}), do: safety_delay
-  defp live_safety_delay({:sliding, _max_segments, safety_delay}), do: safety_delay
+      {:event, safety_delay} ->
+        {:event, %{safety_delay: safety_delay, sync_state: nil}}
+
+      {:sliding, max_segments, safety_delay} ->
+        {:sliding, %{max_segments: max_segments, safety_delay: safety_delay, sync_state: nil}}
+    end
+  end
+
+  defp update_mode_after_setup({:sliding, state}, packager) do
+    {:sliding, Map.put(state, :max_segments, packager.max_segments)}
+  end
+
+  defp update_mode_after_setup(mode, _packager), do: mode
+
+  defp mode_max_segments(:vod), do: nil
+  defp mode_max_segments({:event, _safety_delay}), do: nil
+  defp mode_max_segments({:sliding, max_segments, _safety_delay}), do: max_segments
+
+  defp mode_sync_state({:event, state}), do: state.sync_state
+  defp mode_sync_state({:sliding, state}), do: state.sync_state
+  defp mode_sync_state({:vod, _state}), do: nil
+
+  defp sync_state_stopped?(mode) do
+    case mode_sync_state(mode) do
+      %{stop: true} -> true
+      _ -> false
+    end
+  end
+
+  defp update_state_sync_state(state, sync_state) do
+    %{state | mode: update_mode_sync_state(state.mode, sync_state)}
+  end
+
+  defp update_mode_sync_state({:event, state}, sync_state) do
+    {:event, %{state | sync_state: sync_state}}
+  end
+
+  defp update_mode_sync_state({:sliding, state}, sync_state) do
+    {:sliding, %{state | sync_state: sync_state}}
+  end
+
+  defp update_mode_sync_state(mode, _sync_state), do: mode
+
+  defp live_mode?({:vod, _state}), do: false
+  defp live_mode?({:event, _state}), do: true
+  defp live_mode?({:sliding, _state}), do: true
+
+  defp live_safety_delay({:event, state}), do: state.safety_delay
+  defp live_safety_delay({:sliding, state}), do: state.safety_delay
 
   defp live_schedule_next_sync(state) do
-    state =
-      state
-      |> update_in([:live_state, :next_sync_point], fn x ->
-        # If the HLS is writing down the chunks faster than realtime,
-        # we might need to sync faster. Thats why we're calling next_syncpoint again.
-        max(x + 1, Packager.next_sync_point(state.packager))
-      end)
-      |> update_in([:live_state, :next_deadline], fn x ->
-        x + Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
-      end)
+    update_in(state, [:mode], fn mode ->
+      sync_state = mode_sync_state(mode)
 
-    state
-    |> put_in(
-      [:live_state, :timer_ref],
-      Process.send_after(self(), :sync, state.live_state.next_deadline, abs: true)
-    )
+      next_sync_point =
+        max(sync_state.next_sync_point + 1, Packager.next_sync_point(state.packager))
+
+      next_deadline =
+        sync_state.next_deadline +
+          Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
+
+      timer_ref = Process.send_after(self(), :sync, next_deadline, abs: true)
+
+      update_mode_sync_state(mode, %{
+        sync_state
+        | next_sync_point: next_sync_point,
+          next_deadline: next_deadline,
+          timer_ref: timer_ref
+      })
+    end)
   end
 
   defp sync_timeout(state) do
     # We wait until we have at least 3 segments before starting the initial sync process.
     # This ensures a stable, interruption free playback for the clients.
-    safety_delay = live_safety_delay(state.playlist_mode)
+    safety_delay = live_safety_delay(state.mode)
 
     target_segment_duration_ms =
       Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
@@ -670,20 +787,20 @@ defmodule Membrane.HLS.SinkBin do
     deadline = now + timeout
 
     Membrane.Logger.info(
-      "Deadline reset. Starting playlist syncronization in #{inspect_timing(timeout)}"
+      "Deadline reset. Starting playlist syncronization in #{inspect_timing(Membrane.Time.milliseconds(timeout))}"
     )
 
-    live_state = %{
+    sync_state = %{
       next_sync_point: next_sync_point,
       next_deadline: deadline,
       stop: false,
       timer_ref: Process.send_after(self(), :sync, deadline, abs: true)
     }
 
-    %{state | live_state: live_state}
+    update_state_sync_state(state, sync_state)
   end
 
-  defp maybe_add_shifter(spec, _track_id, %{live_playlist?: true}), do: spec
+  defp maybe_add_shifter(spec, _track_id, %{mode: {:sliding, _state}}), do: spec
 
   defp maybe_add_shifter(spec, track_id, state) do
     offset = track_pts(state.packager, track_id)
@@ -873,7 +990,7 @@ defmodule Membrane.HLS.SinkBin do
     end
   end
 
-  defp maybe_sync_on_segment(%{playlist_mode: :vod, expected_tracks: expected} = state) do
+  defp maybe_sync_on_segment(%{mode: {:vod, _state}, expected_tracks: expected} = state) do
     if MapSet.size(expected) > 0 do
       state
     else
