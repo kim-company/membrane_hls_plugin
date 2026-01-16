@@ -78,8 +78,7 @@ defmodule Membrane.HLS.Filler.AAC do
       if from < to do
         generate_buffers(from, to, ctx.pads.input.stream_format)
       else
-        # Either its zero or negative (hence trimmer did not do its job).
-        # In any case, we don't have to add anything.
+        # Nothing to fill.
         []
       end
 

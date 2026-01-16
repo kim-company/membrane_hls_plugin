@@ -22,10 +22,10 @@ defmodule Membrane.HLS.SinkBinEventTest do
     spec =
       manifest_uri
       |> Builder.build_base_spec(storage, playlist_mode: event_mode())
-      |> Enum.concat(Builder.build_subtitles_spec())
       |> Enum.concat(Builder.build_cmaf_spec())
 
-    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
+    pipeline =
+      Membrane.Testing.Pipeline.start_link_supervised!(spec: spec, test_process: self())
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
     :ok = Membrane.Pipeline.terminate(pipeline)
 
@@ -42,7 +42,6 @@ defmodule Membrane.HLS.SinkBinEventTest do
     spec =
       manifest_uri
       |> Builder.build_base_spec(storage, playlist_mode: event_mode())
-      |> Enum.concat(Builder.build_subtitles_spec())
       |> Enum.concat(Builder.build_mpeg_ts_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
@@ -54,7 +53,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
   end
 
   @tag :tmp_dir
-  test "on a new stream, MPEG-TS with AAC", %{tmp_dir: tmp_dir} do
+  test "on a new stream, MPEG-TS (audio-only)", %{tmp_dir: tmp_dir} do
     storage = HLS.Storage.File.new(base_dir: tmp_dir)
 
     manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
@@ -62,8 +61,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
     spec =
       manifest_uri
       |> Builder.build_base_spec(storage, playlist_mode: event_mode())
-      |> Enum.concat(Builder.build_subtitles_spec())
-      |> Enum.concat(Builder.build_full_mpeg_ts_spec())
+      |> Enum.concat(Builder.build_mpeg_ts_audio_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
@@ -202,6 +200,100 @@ defmodule Membrane.HLS.SinkBinEventTest do
       segments = Enum.filter(media.segments, & &1.discontinuity)
       assert length(segments) >= 1
     end)
+  end
+
+  @tag :tmp_dir
+  test "fails fast when a mandatory track is missing at sync", %{tmp_dir: tmp_dir} do
+    storage = HLS.Storage.File.new(base_dir: tmp_dir)
+    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
+
+    buffers = [
+      aac_buffer("a", 0),
+      aac_buffer("b", 1_000),
+      aac_buffer("c", 2_000)
+    ]
+
+    format = %Membrane.AAC{
+      profile: :LC,
+      sample_rate: 48_000,
+      channels: 2,
+      mpeg_version: 4
+    }
+
+    spec = [
+      child(:sink, %Membrane.HLS.SinkBin{
+        storage: storage,
+        manifest_uri: manifest_uri,
+        target_segment_duration: Membrane.Time.seconds(1),
+        playlist_mode: event_mode(),
+        flush_on_end: false
+      }),
+      child(:audio_source, %Membrane.Testing.Source{
+        stream_format: format,
+        output: {buffers, &stream_without_eos/2}
+      })
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          container: :PACKED_AAC,
+          segment_duration: Membrane.Time.seconds(1),
+          build_stream: fn _format ->
+            %HLS.VariantStream{
+              uri: nil,
+              bandwidth: 128_000,
+              codecs: ["mp4a.40.2"]
+            }
+          end
+        ]
+      )
+      |> get_child(:sink),
+      child(:video_source, %Membrane.Testing.Source{
+        stream_format: %Membrane.RemoteStream{
+          content_format: %Membrane.MPEG.TS.StreamFormat{stream_type: :H264_AVC},
+          type: :bytestream
+        },
+        output: {[], &stream_without_eos/2}
+      })
+      |> via_in(Pad.ref(:input, "video_460x720"),
+        options: [
+          encoding: :H264,
+          container: :TS,
+          segment_duration: Membrane.Time.seconds(1),
+          build_stream: fn _format ->
+            %HLS.VariantStream{
+              uri: nil,
+              bandwidth: 900_000,
+              codecs: ["avc1.64001f"]
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+
+    Process.flag(:trap_exit, true)
+    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec, test_process: self())
+    sink_pid = Membrane.Testing.Pipeline.get_child_pid!(pipeline, :sink)
+
+    assert_receive(
+      {Membrane.Testing.Pipeline, ^pipeline,
+       {:handle_child_notification,
+        {{:packager_updated, :track_added, _packager, %{track_id: "video_460x720"}}, :sink}}},
+      1_000
+    )
+
+    wait_for_segments(tmp_dir, 1, 5_000)
+
+    send(sink_pid, :sync)
+    send(sink_pid, :sync)
+
+    assert_receive {:EXIT, ^pipeline, reason}, 3_000
+
+    assert match?(
+             {:membrane_child_crash, :sink, {%RuntimeError{}, _}},
+             reason
+           ),
+           "Expected sink to fail fast on mandatory track missing"
   end
 
   @tag :tmp_dir

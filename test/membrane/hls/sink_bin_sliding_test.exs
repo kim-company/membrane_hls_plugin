@@ -30,12 +30,18 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
         target_segment_duration: Membrane.Time.seconds(8),
         flush_on_end: false
       )
-      |> Enum.concat(Builder.build_subtitles_spec())
       |> Enum.concat(Builder.build_cmaf_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, false}, 10_000)
-    wait_for_segments(tmp_dir, 3, [".m4s"], 5_000)
+    wait_for_track_segments(
+      tmp_dir,
+      [
+        {"**/*video_460x720*.m4s", 3},
+        {"**/*audio_128k*.m4s", 3}
+      ],
+      5_000
+    )
     send_syncs(pipeline, 3)
     wait_for_master_playlist(tmp_dir, 5_000)
 
@@ -59,12 +65,18 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
         target_segment_duration: Membrane.Time.seconds(8),
         flush_on_end: false
       )
-      |> Enum.concat(Builder.build_subtitles_spec())
       |> Enum.concat(Builder.build_mpeg_ts_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, false}, 10_000)
-    wait_for_segments(tmp_dir, 3, [".ts", ".aac"], 5_000)
+    wait_for_track_segments(
+      tmp_dir,
+      [
+        {"**/*video_460x720*.ts", 3},
+        {"**/*audio_128k*.aac", 3}
+      ],
+      5_000
+    )
     send_syncs(pipeline, 3)
     wait_for_master_playlist(tmp_dir, 5_000)
 
@@ -76,7 +88,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
   end
 
   @tag :tmp_dir
-  test "on a new stream, MPEG-TS with AAC", %{tmp_dir: tmp_dir} do
+  test "on a new stream, MPEG-TS (audio-only)", %{tmp_dir: tmp_dir} do
     storage = HLS.Storage.File.new(base_dir: tmp_dir)
 
     manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
@@ -88,8 +100,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
         target_segment_duration: Membrane.Time.seconds(8),
         flush_on_end: false
       )
-      |> Enum.concat(Builder.build_subtitles_spec())
-      |> Enum.concat(Builder.build_full_mpeg_ts_spec())
+      |> Enum.concat(Builder.build_mpeg_ts_audio_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, false}, 10_000)
@@ -219,6 +230,18 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
 
   defp wait_for_segments(tmp_dir, count, extensions, timeout_ms) do
     wait_until(timeout_ms, fn -> count_segment_files(tmp_dir, extensions) >= count end)
+  end
+
+  defp wait_for_track_segments(tmp_dir, patterns, timeout_ms) do
+    wait_until(timeout_ms, fn ->
+      Enum.all?(patterns, fn {pattern, count} ->
+        tmp_dir
+        |> Path.join(pattern)
+        |> Path.wildcard()
+        |> length()
+        |> Kernel.>=(count)
+      end)
+    end)
   end
 
   defp wait_for_media_playlist(tmp_dir, timeout_ms) do

@@ -32,8 +32,17 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
 ### Advanced Features
 - **Codec Serialization**: Automatic codec string generation (avc1, hvc1, mp4a)
 - **Segment Management**: Configurable target segment durations
-- **Timeline Handling**: PTS shifting and discontinuity markers
 - **Multi-track Support**: Audio, video, and subtitle tracks in single pipeline
+
+### Timing Contract and Policies
+- **Upstream timestamps are authoritative**: SinkBin does not shift, trim, or synthesize PTS/DTS.
+- **Alignment required**: Tracks that produce segments at a sync point must be time-aligned
+  (minor AAC/H264 cut differences are tolerated by the packager).
+- **RFC-compliant output**: discontinuities are inserted when needed; playlists remain spec compliant.
+- **Error policy**:
+  - `:vod` is strict and fails fast on packager errors.
+  - `:event`/`:sliding` are tolerant to recoverable timing issues but fail fast on missing
+    mandatory track segments to avoid silent stalls.
 
 ## Architecture
 

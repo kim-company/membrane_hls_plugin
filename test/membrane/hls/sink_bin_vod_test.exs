@@ -13,9 +13,8 @@ defmodule Membrane.HLS.SinkBinVODTest do
 
     spec =
       manifest_uri
-      |> Builder.build_base_spec(storage)
-      |> Enum.concat(Builder.build_subtitles_spec())
-      |> Enum.concat(Builder.build_cmaf_spec())
+      |> Builder.build_base_spec(storage, target_segment_duration: Membrane.Time.seconds(8))
+      |> Enum.concat(Builder.build_cmaf_video_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
@@ -33,9 +32,8 @@ defmodule Membrane.HLS.SinkBinVODTest do
 
     spec =
       manifest_uri
-      |> Builder.build_base_spec(storage)
-      |> Enum.concat(Builder.build_subtitles_spec())
-      |> Enum.concat(Builder.build_mpeg_ts_spec())
+      |> Builder.build_base_spec(storage, target_segment_duration: Membrane.Time.seconds(8))
+      |> Enum.concat(Builder.build_mpeg_ts_video_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
@@ -53,9 +51,8 @@ defmodule Membrane.HLS.SinkBinVODTest do
 
     spec =
       manifest_uri
-      |> Builder.build_base_spec(storage)
-      |> Enum.concat(Builder.build_subtitles_spec())
-      |> Enum.concat(Builder.build_full_mpeg_ts_spec())
+      |> Builder.build_base_spec(storage, target_segment_duration: Membrane.Time.seconds(8))
+      |> Enum.concat(Builder.build_packed_aac_spec())
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)

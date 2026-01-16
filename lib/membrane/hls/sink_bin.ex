@@ -1,22 +1,25 @@
 defmodule Membrane.HLS.SinkBin do
   @moduledoc """
-  Bin responsible for receiving audio and video streams, performing payloading and CMAF/TS/AAC
-  muxing to eventually store them using provided storage configuration.
+  Bin responsible for receiving audio/video/text tracks, packaging them into CMAF/TS/AAC,
+  and writing playlists/segments via the provided storage.
 
-  As soon as a spec-compliant HLS stream which segments of the same index:
-  - start roughly at the same time (AAC and H264 cannot be cut at the same exact time)
-  - have the same duration
+  ## Timing contract
+  - Upstream must provide monotonic, accurate PTS/DTS per track.
+  - Tracks that produce segments at a given sync point must be aligned in time
+    (minor AAC/H264 cut differences are tolerated within packager tolerance).
+  - The sink does not shift, trim, or otherwise repair timestamps.
 
-  The following measures have been implemented:
-  - audio+subtitles fillers: if video starts earlier, we add the missing silence
-  - audio+subtitles trimmers: if video starts later, we trim leading content
+  ## Operational modes
+  - `:vod` syncs whenever the next segment group is ready and is strict about timing.
+  - `{:event, safety_delay}` syncs on a target-duration cadence.
+  - `{:sliding, max_segments, safety_delay}` syncs on cadence and keeps a rolling window.
 
-  Special cases for our companies internal requirements (might change in the future):
-  - when in a sliding window setup, we use discontinuities when the stream restarts
-  - when in a non-sliding window setup, playlists will contain a best-effort strictly
-  monotonically increasing PTS/DTS timeline. Best effort because right after a restart
-  audio and video will contain a small offset hole. This is **not** spec complaint and
-  we're planning on using the discontinuity pattern there as well.
+  ## Policy and error handling
+  - All outputs are RFC-compliant.
+  - `:vod` is strict: any packager error fails fast.
+  - `:event`/`:sliding` are tolerant to recoverable timing issues by inserting
+    discontinuities, but fail fast on missing mandatory track segments to avoid
+    silent stalls.
   """
   use Membrane.Bin
   alias HLS.Packager
@@ -141,10 +144,7 @@ defmodule Membrane.HLS.SinkBin do
         ended_sinks: MapSet.new(),
         mode: build_mode(opts),
         expected_tracks: MapSet.new(),
-        time_discovery: %{
-          candidates: %{},
-          target_track: nil
-        }
+        time_discovery: %{}
       }}
   end
 
@@ -161,88 +161,6 @@ defmodule Membrane.HLS.SinkBin do
     }
 
     {actions, state}
-  end
-
-  @impl true
-  def handle_playing(_ctx, state) do
-    # We need to discover the time we're going to use as reference. If we have video,
-    # we're using it. If only audio/subtitles tracks are present, we're using one of those.
-    case state.time_discovery.candidates do
-      candidates when map_size(candidates) > 0 ->
-        {track_id, _} =
-          candidates
-          |> Enum.sort(fn {_, left}, {_, right} -> left > right end)
-          |> List.first()
-
-        Membrane.Logger.info("Time reference will be obtained from track #{inspect(track_id)}")
-        state = put_in(state, [:time_discovery, :target_track], track_id)
-        {[], state}
-
-      _ ->
-        Membrane.Logger.warning("Time reference candidates not available at playback start")
-        {[], state}
-    end
-  end
-
-  @impl true
-  def handle_child_notification({:observed_time, t}, {:time_checker, track_id}, _ctx, state) do
-    Membrane.Logger.info(
-      "Observed time #{inspect_timing(t)} on track #{inspect(track_id)} after guardrails"
-    )
-
-    {[], state}
-  end
-
-  def handle_child_notification(
-        {:observed_time, t},
-        {:time_observer, track_id},
-        ctx,
-        state = %{time_discovery: %{target_track: nil}}
-      ) do
-    Membrane.Logger.info(
-      "Discovered reference time #{inspect_timing(t)} on track #{inspect(track_id)}}"
-    )
-
-    actions =
-      ctx.children
-      |> Enum.filter(fn
-        {{x, _track_id}, _info} when x in [:trimmer, :filler] -> true
-        _ -> false
-      end)
-      |> Enum.map(fn {k, _} -> {:notify_child, {k, {:time_reference, t}}} end)
-
-    state = put_in(state, [:time_discovery, :target_track], track_id)
-
-    {actions, state}
-  end
-
-  def handle_child_notification(
-        {:observed_time, t},
-        {:time_observer, track_id},
-        ctx,
-        state = %{time_discovery: %{target_track: track_id}}
-      ) do
-    Membrane.Logger.info(
-      "Discovered reference time #{inspect_timing(t)} on track #{inspect(track_id)}}"
-    )
-
-    actions =
-      ctx.children
-      |> Enum.filter(fn
-        {{x, _track_id}, _info} when x in [:trimmer, :filler] -> true
-        _ -> false
-      end)
-      |> Enum.map(fn {k, _} -> {:notify_child, {k, {:time_reference, t}}} end)
-
-    {actions, state}
-  end
-
-  def handle_child_notification({:observed_time, t}, {:time_observer, track_id}, _ctx, state) do
-    Membrane.Logger.info(
-      "Observed time #{inspect_timing(t)} on track #{inspect(track_id)} before railguards"
-    )
-
-    {[], state}
   end
 
   def handle_child_notification({:packager_add_track, track_id, opts}, _child, _ctx, state) do
@@ -309,7 +227,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.AAC)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
         target_duration: pad_opts.segment_duration
       })
@@ -319,10 +236,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    state =
-      state
-      |> register_track(track_id)
-      |> register_time_observer(track_id, 1)
+    state = register_track(state, track_id)
 
     {[spec: spec], state}
   end
@@ -334,7 +248,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.AAC)
       |> via_in(:input, options: [stream_type: :AAC_ADTS])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.HLS.MPEG.TS.Aggregator{
@@ -346,10 +259,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    state =
-      state
-      |> register_track(track_id)
-      |> register_time_observer(track_id, 1)
+    state = register_track(state, track_id)
 
     {[spec: spec], state}
   end
@@ -361,7 +271,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.AAC)
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -373,10 +282,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    state =
-      state
-      |> register_track(track_id)
-      |> register_time_observer(track_id, 1)
+    state = register_track(state, track_id)
 
     {[spec: spec], state}
   end
@@ -388,7 +294,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state)
       |> via_in(:input, options: [stream_type: :H264_AVC])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.HLS.MPEG.TS.Aggregator{
@@ -400,10 +305,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    state =
-      state
-      |> register_track(track_id)
-      |> register_time_observer(track_id, 2)
+    state = register_track(state, track_id)
 
     {[spec: spec], state}
   end
@@ -415,7 +317,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state)
       |> child({:duration_estimator, track_id}, Membrane.HLS.NALU.DurationEstimator)
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
@@ -428,10 +329,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    state =
-      state
-      |> register_track(track_id)
-      |> register_time_observer(track_id, 2)
+    state = register_track(state, track_id)
 
     {[spec: spec], state}
   end
@@ -443,7 +341,6 @@ defmodule Membrane.HLS.SinkBin do
       ) do
     spec =
       bin_input(pad)
-      |> add_track_guardrails(track_id, state, Membrane.HLS.Filler.Text)
       |> child({:cues, track_id}, %Membrane.WebVTT.Filter{
         min_duration: pad_opts.subtitle_min_duration
       })
@@ -461,10 +358,7 @@ defmodule Membrane.HLS.SinkBin do
         build_stream: pad_opts.build_stream
       })
 
-    state =
-      state
-      |> register_track(track_id)
-      |> register_time_observer(track_id)
+    state = register_track(state, track_id)
 
     {[spec: spec], state}
   end
@@ -800,41 +694,8 @@ defmodule Membrane.HLS.SinkBin do
     update_state_sync_state(state, sync_state)
   end
 
-  defp maybe_add_shifter(spec, _track_id, %{mode: {:sliding, _state}}), do: spec
-
-  defp maybe_add_shifter(spec, track_id, state) do
-    offset = track_pts(state.packager, track_id)
-
-    Membrane.Logger.info(
-      "Adding shifter for track #{inspect(track_id)} with offset #{inspect_timing(offset)}"
-    )
-
-    child(spec, {:shifter, track_id}, %Membrane.HLS.Shifter{
-      duration: offset
-    })
-  end
-
-  defp register_time_observer(state, track_id, prio \\ 0) do
-    put_in(state, [:time_discovery, :candidates, track_id], prio)
-  end
-
   defp register_track(state, track_id) do
     update_in(state, [:expected_tracks], &MapSet.put(&1, track_id))
-  end
-
-  defp add_track_guardrails(spec, track_id, state, filler \\ nil) do
-    spec
-    |> child({:time_observer, track_id}, Membrane.HLS.TimeObserver)
-    |> child({:trimmer, track_id}, Membrane.HLS.Trimmer)
-    |> then(fn spec ->
-      if filler do
-        child(spec, {:filler, track_id}, filler)
-      else
-        spec
-      end
-    end)
-    |> maybe_add_shifter(track_id, state)
-    |> child({:time_checker, track_id}, Membrane.HLS.TimeObserver)
   end
 
   defp handle_packager_put_segment(state, track_id, payload, duration, pts, dts) do
@@ -864,8 +725,9 @@ defmodule Membrane.HLS.SinkBin do
             "Packager rejected segment on track #{inspect(track_id)}: #{inspect(error)}"
           )
 
-          %{state | packager: packager}
-          |> maybe_skip_sync_point(error)
+          state
+          |> Map.put(:packager, packager)
+          |> handle_packager_error(error)
       end
     end
   end
@@ -1015,15 +877,15 @@ defmodule Membrane.HLS.SinkBin do
         |> execute_actions(actions)
 
       {:warning, warnings, packager} ->
-        Enum.each(warnings, fn warning ->
-          Membrane.Logger.warning("Packager sync warning: #{inspect(warning)}")
-        end)
-
-        %{state | packager: packager}
+        state
+        |> Map.put(:packager, packager)
+        |> handle_packager_warnings(warnings)
 
       {:error, error, packager} ->
         Membrane.Logger.error("Packager sync failed: #{inspect(error)}")
-        %{state | packager: packager}
+        state
+        |> Map.put(:packager, packager)
+        |> handle_packager_error(error)
     end
   end
 
@@ -1035,10 +897,57 @@ defmodule Membrane.HLS.SinkBin do
     |> execute_actions(actions)
   end
 
-  defp maybe_skip_sync_point(state, %Packager.Error{code: code, details: details})
-       when code in [:segment_duration_over_target, :timing_drift] do
-    sync_point = Map.get(details, :segment_index) || Map.get(details, :sync_point)
+  defp handle_packager_error(state, %Packager.Error{code: code} = error) do
+    if strict_policy?(state.mode) do
+      raise "Packager error (strict mode): #{inspect(error)}"
+    else
+      case code do
+        :mandatory_track_missing_segment_at_sync ->
+          raise "Packager error (mandatory track missing): #{inspect(error)}"
 
+        :segment_duration_over_target ->
+          skip_sync_point_or_raise(state, error, :segment_index)
+
+        :timing_drift ->
+          skip_sync_point_or_raise(state, error, :segment_index)
+
+        :track_timing_mismatch_at_sync ->
+          skip_sync_point_or_raise(state, error, :sync_point)
+
+        :discontinuity_point_missed ->
+          raise "Packager error (discontinuity missed): #{inspect(error)}"
+
+        _ ->
+          raise "Packager error (unhandled): #{inspect(error)}"
+      end
+    end
+  end
+
+  defp handle_packager_warnings(state, warnings) do
+    case Enum.find(warnings, &(&1.code == :mandatory_track_missing_segment_at_sync)) do
+      nil ->
+        Enum.each(warnings, fn warning ->
+          Membrane.Logger.warning("Packager sync warning: #{inspect(warning)}")
+        end)
+
+        state
+
+      warning ->
+        raise "Packager warning (mandatory track missing): #{inspect(warning)}"
+    end
+  end
+
+  defp skip_sync_point_or_raise(state, %Packager.Error{details: details} = error, key) do
+    case Map.get(details, key) do
+      sync_point when is_integer(sync_point) and sync_point > 0 ->
+        skip_sync_point(state, sync_point)
+
+      _ ->
+        raise "Packager error missing sync point metadata: #{inspect(error)}"
+    end
+  end
+
+  defp skip_sync_point(state, sync_point) when is_integer(sync_point) and sync_point > 0 do
     case Packager.skip_sync_point(state.packager, sync_point) do
       {packager, _actions} ->
         %{state | packager: packager}
@@ -1049,17 +958,9 @@ defmodule Membrane.HLS.SinkBin do
     end
   end
 
-  defp maybe_skip_sync_point(state, _error), do: state
+  defp skip_sync_point(state, _sync_point), do: state
 
-  defp track_pts(packager, track_id) do
-    case Map.fetch(packager.tracks, track_id) do
-      {:ok, track} ->
-        round(track.duration * 1.0e9)
-
-      :error ->
-        0
-    end
-  end
+  defp strict_policy?(mode), do: match?({:vod, _}, mode)
 
   defp inspect_timing(t), do: "#{Float.round(t / 1.0e9, 2)}s"
 end

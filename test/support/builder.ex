@@ -95,7 +95,6 @@ defmodule Support.Builder do
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :video])
       |> child(:h264_parser, %Membrane.H264.Parser{
-        generate_best_effort_timestamps: %{framerate: {25, 1}},
         output_stream_structure: :avc1,
         skip_until_keyframe: false
       })
@@ -112,6 +111,33 @@ defmodule Support.Builder do
               codecs: [],
               audio: "audio",
               subtitles: "subtitles"
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+  end
+
+  def build_cmaf_video_spec() do
+    [
+      get_child(:demuxer)
+      |> via_out(:output, options: [stream_category: :video])
+      |> child(:h264_parser, %Membrane.H264.Parser{
+        output_stream_structure: :avc1,
+        skip_until_keyframe: false
+      })
+      |> via_in(Pad.ref(:input, "video_460x720"),
+        options: [
+          encoding: :H264,
+          segment_duration: Membrane.Time.seconds(6),
+          build_stream: fn %Membrane.CMAF.Track{} = format ->
+            %HLS.VariantStream{
+              uri: nil,
+              bandwidth: 850_000,
+              resolution: format.resolution,
+              frame_rate: 30.0,
+              codecs: []
             }
           end
         ]
@@ -172,6 +198,89 @@ defmodule Support.Builder do
               codecs: codecs,
               audio: "audio",
               subtitles: "subtitles"
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+  end
+
+  def build_mpeg_ts_video_spec() do
+    [
+      get_child(:demuxer)
+      |> via_out(:output, options: [stream_category: :video])
+      |> child(:h264_parser, %Membrane.NALU.ParserBin{
+        assume_aligned: true,
+        alignment: :aud
+      })
+      |> via_in(Pad.ref(:input, "video_460x720"),
+        options: [
+          encoding: :H264,
+          container: :TS,
+          segment_duration: Membrane.Time.seconds(6),
+          build_stream: fn _format ->
+            codecs =
+              Membrane.HLS.serialize_codecs(%{
+                avc1: %{profile: 100, level: 31, compatibility: 0}
+              })
+
+            %HLS.VariantStream{
+              uri: nil,
+              bandwidth: 850_000,
+              resolution: {460, 720},
+              frame_rate: 30.0,
+              codecs: codecs
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+  end
+
+  def build_mpeg_ts_audio_spec() do
+    [
+      get_child(:demuxer)
+      |> via_out(:output, options: [stream_category: :audio])
+      |> child(:aac_parser, %Membrane.AAC.Parser{
+        out_encapsulation: :ADTS
+      })
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          container: :TS,
+          segment_duration: Membrane.Time.seconds(6),
+          build_stream: fn _format ->
+            %HLS.VariantStream{
+              uri: nil,
+              bandwidth: 128_000,
+              codecs: ["mp4a.40.2"]
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+  end
+
+  def build_packed_aac_spec() do
+    [
+      get_child(:demuxer)
+      |> via_out(:output, options: [stream_category: :audio])
+      |> child(:aac_parser, %Membrane.AAC.Parser{
+        out_encapsulation: :none
+      })
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          container: :PACKED_AAC,
+          segment_duration: Membrane.Time.seconds(6),
+          build_stream: fn _format ->
+            %HLS.VariantStream{
+              uri: nil,
+              bandwidth: 128_000,
+              codecs: ["mp4a.40.2"]
             }
           end
         ]
