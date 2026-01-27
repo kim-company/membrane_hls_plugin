@@ -25,9 +25,13 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
     state = %{
       target_duration: opts.target_duration,
       acc: [],
+      ts: nil,
       pts: nil,
       dts: nil,
-      accumulated_offset: 0
+      last_ts: nil,
+      last_duration: nil,
+      accumulated_offset: 0,
+      pat_pmt: %{pat: nil, pmt: nil}
     }
 
     {[], state}
@@ -43,28 +47,54 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
     {[buffer: {:output, buffer}, end_of_stream: :output], state}
   end
 
+  def handle_buffer(
+        :input,
+        buffer = %{metadata: %{pid: 0}},
+        _ctx,
+        state
+      ) do
+    {[], put_in(state, [:pat_pmt, :pat], buffer)}
+  end
+
+  def handle_buffer(
+        :input,
+        buffer = %{metadata: %{pid: 0x1000}},
+        _ctx,
+        state
+      ) do
+    {[], put_in(state, [:pat_pmt, :pmt], buffer)}
+  end
+
   @impl true
-  def handle_buffer(:input, buffer = %{pts: nil}, _ctx, state) do
-    # This might be a PAT/PMT buffer which does not have PTS information.
-    state = add_frame(state, buffer)
+  def handle_buffer(:input, %{pts: nil}, _ctx, state) do
+    # Drop packets without timing info (PAT/PMT are cached via PID handlers).
     {[], state}
   end
 
   def handle_buffer(
         :input,
-        buffer = %{metadata: %{pusi: true}},
+        buffer = %{metadata: %{pusi: true, rai: true}},
         _ctx,
-        state = %{pts: nil}
+        state = %{ts: nil}
       ) do
     {[], init_segment(state, buffer)}
   end
 
+  def handle_buffer(
+        :input,
+        %{metadata: %{pusi: true}},
+        _ctx,
+        state = %{ts: nil}
+      ) do
+    {[], state}
+  end
+
   def handle_buffer(:input, buffer = %{metadata: %{rai: true}}, _ctx, state) do
-    actual_duration = buffer.pts - state.pts
-    duration = state.accumulated_offset + actual_duration
+    buffer_ts = Membrane.Buffer.get_dts_or_pts(buffer)
+    duration = state.accumulated_offset + (buffer_ts - state.ts)
 
     if duration >= state.target_duration do
-      {output, state} = finalize_segment(state, actual_duration)
+      {output, state} = finalize_segment(state, duration)
       state = init_segment(state, buffer)
       {[buffer: {:output, output}], state}
     else
@@ -89,26 +119,49 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
   end
 
   defp init_segment(state, buffer) do
+    pat_pmt = [state.pat_pmt.pmt, state.pat_pmt.pat] |> Enum.reject(&is_nil/1)
+    buffer_ts = Membrane.Buffer.get_dts_or_pts(buffer)
+
     state
-    |> update_in([:acc], fn acc -> [buffer | acc] end)
+    |> update_in([:acc], fn acc -> [buffer | pat_pmt ++ acc] end)
+    |> put_in([:ts], buffer_ts)
     |> put_in([:pts], buffer.pts)
     |> put_in([:dts], buffer.dts)
+    |> put_in([:last_ts], buffer_ts)
+    |> put_in([:last_duration], nil)
   end
 
   defp add_frame(state, buffer) do
-    state
-    |> update_in([:acc], fn acc -> [buffer | acc] end)
+    buffer_ts = Membrane.Buffer.get_dts_or_pts(buffer)
+
+    state =
+      if state.last_ts != nil and buffer_ts != nil and buffer_ts != state.last_ts do
+        last_duration = buffer_ts - state.last_ts
+
+        state
+        |> put_in([:last_duration], last_duration)
+        |> put_in([:last_ts], buffer_ts)
+      else
+        state
+      end
+
+    update_in(state, [:acc], fn acc -> [buffer | acc] end)
   end
 
   defp finalize_segment(state) do
     buffers = Enum.reverse(state.acc)
-    duration = List.last(buffers).pts - state.pts
+    last_ts = Membrane.Buffer.get_dts_or_pts(List.last(buffers))
+
+    duration =
+      case state.last_duration do
+        nil -> last_ts - state.ts
+        last_duration -> last_ts + last_duration - state.ts
+      end
     finalize_segment(state, duration)
   end
 
   defp finalize_segment(state, duration) do
     buffers = Enum.reverse(state.acc)
-
     units = Enum.flat_map(buffers, fn x -> Map.get(x.metadata, :units, []) end)
 
     payload =
@@ -123,16 +176,20 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
       metadata: %{pusi: true, duration: duration, units: units}
     }
 
-    # Calculate offset to carry forward to next segment
+    # Calculate offset to carry forward to next segment (only over-target is credited)
     offset = duration - state.target_duration
 
     state =
       state
       |> put_in([:acc], [])
+      |> put_in([:ts], nil)
       |> put_in([:pts], nil)
       |> put_in([:dts], nil)
+      |> put_in([:last_ts], nil)
+      |> put_in([:last_duration], nil)
       |> update_in([:accumulated_offset], fn current_offset -> current_offset + offset end)
 
     {buffer, state}
   end
+
 end
