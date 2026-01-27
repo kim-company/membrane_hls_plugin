@@ -119,7 +119,10 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
   end
 
   defp init_segment(state, buffer) do
-    pat_pmt = [state.pat_pmt.pmt, state.pat_pmt.pat] |> Enum.reject(&is_nil/1)
+    pat_pmt =
+      [state.pat_pmt.pmt, state.pat_pmt.pat]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&retime_psi(&1, buffer))
     buffer_ts = Membrane.Buffer.get_dts_or_pts(buffer)
 
     state
@@ -129,6 +132,10 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
     |> put_in([:dts], buffer.dts)
     |> put_in([:last_ts], buffer_ts)
     |> put_in([:last_duration], nil)
+  end
+
+  defp retime_psi(%Membrane.Buffer{} = psi_buffer, %Membrane.Buffer{} = ts_buffer) do
+    %Membrane.Buffer{psi_buffer | pts: ts_buffer.pts, dts: ts_buffer.dts}
   end
 
   defp add_frame(state, buffer) do
