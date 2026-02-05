@@ -12,7 +12,10 @@ defmodule Support.Builder do
 
   def build_base_spec(manifest_uri, storage, opts \\ []) do
     playlist_mode = Keyword.get(opts, :playlist_mode, :vod)
-    target_segment_duration = Keyword.get(opts, :target_segment_duration, Membrane.Time.seconds(7))
+
+    target_segment_duration =
+      Keyword.get(opts, :target_segment_duration, Membrane.Time.seconds(7))
+
     flush_on_end = Keyword.get(opts, :flush_on_end, true)
 
     [
@@ -23,7 +26,6 @@ defmodule Support.Builder do
         playlist_mode: playlist_mode,
         flush_on_end: flush_on_end
       }),
-
       child(:source, %Membrane.File.Source{
         location: @avsync
       })
@@ -146,6 +148,15 @@ defmodule Support.Builder do
     ]
   end
 
+  defp build_h264_parser(spec, child_name \\ {:h264, :parser}) do
+    child(spec, child_name, %Membrane.H264.Parser{
+      output_stream_structure: :annexb,
+      repeat_parameter_sets: true,
+      output_alignment: :au,
+      skip_until_keyframe: false
+    })
+  end
+
   def build_mpeg_ts_spec() do
     [
       get_child(:demuxer)
@@ -175,10 +186,7 @@ defmodule Support.Builder do
       |> get_child(:sink),
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :video])
-      |> child(:h264_parser, %Membrane.NALU.ParserBin{
-        assume_aligned: true,
-        alignment: :aud
-      })
+      |> build_h264_parser()
       |> via_in(Pad.ref(:input, "video_460x720"),
         options: [
           encoding: :H264,
@@ -210,10 +218,7 @@ defmodule Support.Builder do
     [
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :video])
-      |> child(:h264_parser, %Membrane.NALU.ParserBin{
-        assume_aligned: true,
-        alignment: :aud
-      })
+      |> build_h264_parser()
       |> via_in(Pad.ref(:input, "video_460x720"),
         options: [
           encoding: :H264,
@@ -318,10 +323,7 @@ defmodule Support.Builder do
       |> get_child(:sink),
       get_child(:demuxer)
       |> via_out(:output, options: [stream_category: :video])
-      |> child(:h264_parser, %Membrane.NALU.ParserBin{
-        assume_aligned: true,
-        alignment: :aud
-      })
+      |> build_h264_parser()
       |> via_in(Pad.ref(:input, "video_460x720"),
         options: [
           encoding: :H264,

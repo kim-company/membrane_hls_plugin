@@ -37,7 +37,6 @@ defmodule Membrane.HLS.MixProject do
       {:membrane_webvtt_plugin, "~> 3.0"},
       {:membrane_mpeg_ts_plugin, "~> 2.0"},
       {:membrane_flv_plugin, "~> 0.13", only: :test},
-      {:membrane_nalu_plugin, "~> 0.1", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end
