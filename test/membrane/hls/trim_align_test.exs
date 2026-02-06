@@ -63,7 +63,7 @@ defmodule Membrane.HLS.TrimAlignTest do
     assert action_buffers_pts(actions, :audio) == [Membrane.Time.milliseconds(1_000)]
   end
 
-  test "follows delayed h264 keyframe when audio starts later" do
+  test "when non-h264 starts after first video keyframe, waits for next video cut point" do
     state = init_align(max_leading_trim: Membrane.Time.seconds(3), max_queued_buffers: 100)
     state = add_pad(state, :video, :h264_keyframe)
     state = add_pad(state, :audio, :any)
@@ -95,6 +95,60 @@ defmodule Membrane.HLS.TrimAlignTest do
         state
       )
 
+    {[], state} = TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(1_000), %{}, state)
+
+    {actions, state} = TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(1_100), %{}, state)
+    assert actions == []
+
+    {actions, state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(1_900, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    assert actions == []
+
+    {actions, _state} =
+      TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(2_000), %{}, state)
+
+    assert action_buffers_pts(actions, :video) == [Membrane.Time.milliseconds(1_900)]
+    assert action_buffers_pts(actions, :audio) == [Membrane.Time.milliseconds(2_000)]
+  end
+
+  test "advances to next video keyframe when subtitle starts after first candidate" do
+    state = init_align(max_leading_trim: Membrane.Time.seconds(3), max_queued_buffers: 100)
+    state = add_pad(state, :video, :h264_keyframe)
+    state = add_pad(state, :subtitles, :any)
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(
+        Pad.ref(:input, :video),
+        %Membrane.H264{alignment: :au, nalu_in_metadata?: true},
+        %{},
+        state
+      )
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(Pad.ref(:input, :subtitles), %Membrane.Text{}, %{}, state)
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(0, %{h264: %{key_frame?: false}}),
+        %{},
+        state
+      )
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(900, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
     {[], state} =
       TrimAlign.handle_buffer(
         Pad.ref(:input, :video),
@@ -103,14 +157,16 @@ defmodule Membrane.HLS.TrimAlignTest do
         state
       )
 
-    {[], state} = TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(1_000), %{}, state)
-    {[], state} = TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(1_100), %{}, state)
+    {actions, state} =
+      TrimAlign.handle_buffer(Pad.ref(:input, :subtitles), buffer(1_200), %{}, state)
+
+    assert actions == []
 
     {actions, _state} =
-      TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(2_000), %{}, state)
+      TrimAlign.handle_buffer(Pad.ref(:input, :subtitles), buffer(2_000), %{}, state)
 
     assert action_buffers_pts(actions, :video) == [Membrane.Time.milliseconds(1_900)]
-    assert action_buffers_pts(actions, :audio) == [Membrane.Time.milliseconds(2_000)]
+    assert action_buffers_pts(actions, :subtitles) == [Membrane.Time.milliseconds(2_000)]
   end
 
   test "raises for non parsed h264 format" do

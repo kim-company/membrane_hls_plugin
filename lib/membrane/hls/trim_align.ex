@@ -2,8 +2,13 @@ defmodule Membrane.HLS.TrimAlign do
   @moduledoc """
   Trims leading buffers so all input pads start at a common synchronization point.
 
-  The synchronization point is chosen as the latest first cuttable timestamp among all input pads.
-  Pads that start earlier are trimmed at the head.
+  When H264 pads are present, synchronization is anchored on H264 keyframe cut points.
+  The aligner chooses the earliest H264 cut point for which all non-H264 pads have already
+  started (`first_ts <= cut_point`). If this is not satisfied, it advances to the next H264
+  cut point and retries.
+
+  Without H264 pads, synchronization falls back to the latest first cuttable timestamp among
+  all pads.
 
   H264 pads can only be trimmed at keyframe boundaries and require parser metadata
   (`%Membrane.H264{alignment: :au, nalu_in_metadata?: true}`).
@@ -146,21 +151,21 @@ defmodule Membrane.HLS.TrimAlign do
          Enum.any?(state.pads, fn {_pad, data} -> is_nil(data.cut_candidate) end) do
       {[], state}
     else
-      reference =
-        state.pads
-        |> Map.values()
-        |> Enum.map(& &1.cut_candidate)
-        |> Enum.max()
+      case resolve_alignment_reference(state.pads) do
+        {:ok, reference} ->
+          case build_alignment_actions(state, reference) do
+            {:ok, actions, pads, aligned_reference} ->
+              {actions, %{state | alignment_reference: aligned_reference, pads: pads}}
 
-      case build_alignment_actions(state, reference) do
-        {:ok, actions, pads, aligned_reference} ->
-          {actions, %{state | alignment_reference: aligned_reference, pads: pads}}
+            :not_ready ->
+              {[], state}
+
+            {:error, reason} ->
+              raise RuntimeError, reason
+          end
 
         :not_ready ->
           {[], state}
-
-        {:error, reason} ->
-          raise RuntimeError, reason
       end
     end
   end
@@ -184,10 +189,94 @@ defmodule Membrane.HLS.TrimAlign do
 
   defp maybe_emit_pending_eos(result), do: result
 
+  defp resolve_alignment_reference(pads) do
+    h264_candidates =
+      pads
+      |> Map.values()
+      |> Enum.filter(&h264_pad?/1)
+      |> Enum.map(& &1.cut_candidate)
+
+    case h264_candidates do
+      [] ->
+        {:ok, latest_cut_candidate(pads)}
+
+      _h264 ->
+        h264_candidates
+        |> Enum.min()
+        |> resolve_h264_reference(pads)
+    end
+  end
+
+  defp resolve_h264_reference(reference, pads) do
+    with {:ok, h264_reference} <- next_common_h264_cut_point(pads, reference) do
+      case latest_non_h264_start_after(pads, h264_reference) do
+        nil -> {:ok, h264_reference}
+        later_start -> resolve_h264_reference(later_start, pads)
+      end
+    end
+  end
+
+  defp next_common_h264_cut_point(pads, reference) do
+    case next_h264_cut_points(pads, reference) do
+      :not_ready ->
+        :not_ready
+
+      {:ok, []} ->
+        {:ok, reference}
+
+      {:ok, cut_points} ->
+        next_reference = Enum.max(cut_points)
+
+        if next_reference == reference do
+          {:ok, reference}
+        else
+          next_common_h264_cut_point(pads, next_reference)
+        end
+    end
+  end
+
+  defp next_h264_cut_points(pads, reference) do
+    Enum.reduce_while(pads, {:ok, []}, fn {_pad, pad_state}, {:ok, acc} ->
+      if h264_pad?(pad_state) do
+        case next_h264_cut_point(pad_state, reference) do
+          :not_ready -> {:halt, :not_ready}
+          ts -> {:cont, {:ok, [ts | acc]}}
+        end
+      else
+        {:cont, {:ok, acc}}
+      end
+    end)
+  end
+
+  defp next_h264_cut_point(pad_state, reference) do
+    buffers = :queue.to_list(pad_state.queue)
+
+    case take_from_reference(buffers, pad_state.cut_strategy, reference) do
+      :not_ready -> :not_ready
+      %{first_forward_ts: ts} -> ts
+    end
+  end
+
+  defp latest_non_h264_start_after(pads, reference) do
+    pads
+    |> Map.values()
+    |> Enum.reject(&h264_pad?/1)
+    |> Enum.map(& &1.first_ts)
+    |> Enum.filter(&(is_integer(&1) and &1 > reference))
+    |> Enum.max(fn -> nil end)
+  end
+
+  defp latest_cut_candidate(pads) do
+    pads
+    |> Map.values()
+    |> Enum.map(& &1.cut_candidate)
+    |> Enum.max()
+  end
+
+  defp h264_pad?(pad_state), do: pad_state.cut_strategy == :h264_keyframe
+
   defp build_alignment_actions(state, reference) do
-    with {:ok, initial_selection} <- select_buffers(state.pads, reference),
-         {:ok, selection, aligned_reference} <-
-           align_selection_to_h264_reference(state.pads, initial_selection, reference),
+    with {:ok, selection} <- select_buffers(state.pads, reference),
          :ok <- validate_trim_limits(state.pads, selection, state.max_leading_trim) do
       actions =
         selection
@@ -205,7 +294,7 @@ defmodule Membrane.HLS.TrimAlign do
           Map.put(acc, pad, %{pad_state | queue: :queue.new(), started?: true})
         end)
 
-      {:ok, actions, pads, aligned_reference}
+      {:ok, actions, pads, reference}
     else
       :not_ready -> :not_ready
       {:error, _reason} = error -> error
@@ -219,41 +308,6 @@ defmodule Membrane.HLS.TrimAlign do
       case take_from_reference(buffers, pad_state.cut_strategy, reference) do
         :not_ready -> {:halt, :not_ready}
         selection -> {:cont, {:ok, Map.put(acc, pad, selection)}}
-      end
-    end)
-  end
-
-  defp align_selection_to_h264_reference(pads, selection, reference) do
-    h264_reference =
-      selection
-      |> Enum.filter(fn {pad, _selection} -> pads[pad].cut_strategy == :h264_keyframe end)
-      |> Enum.map(fn {_pad, %{first_forward_ts: ts}} -> ts end)
-      |> case do
-        [] -> reference
-        starts -> Enum.max([reference | starts])
-      end
-
-    if h264_reference == reference do
-      {:ok, selection, h264_reference}
-    else
-      case select_any_with_reference(pads, selection, h264_reference) do
-        {:ok, updated_selection} -> {:ok, updated_selection, h264_reference}
-        :not_ready -> :not_ready
-      end
-    end
-  end
-
-  defp select_any_with_reference(pads, selection, reference) do
-    Enum.reduce_while(pads, {:ok, selection}, fn {pad, pad_state}, {:ok, acc} ->
-      if pad_state.cut_strategy == :h264_keyframe do
-        {:cont, {:ok, acc}}
-      else
-        buffers = :queue.to_list(pad_state.queue)
-
-        case take_from_reference(buffers, pad_state.cut_strategy, reference) do
-          :not_ready -> {:halt, :not_ready}
-          updated -> {:cont, {:ok, Map.put(acc, pad, updated)}}
-        end
       end
     end)
   end

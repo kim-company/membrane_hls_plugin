@@ -9,6 +9,9 @@ defmodule Membrane.HLS.SinkBin do
     (minor AAC/H264 cut differences are tolerated within packager tolerance).
   - By default, the sink does not shift or trim timestamps.
   - Optional startup alignment trimming can be enabled with `:trim_align?`.
+    This alignment is performed once at startup (not continuously).
+    When H264 is present, alignment is anchored to H264 keyframes and advances to the next
+    keyframe until all non-H264 tracks started at or before the selected cut point.
 
   ## Operational modes
   - `:vod` syncs whenever the next segment group is ready and is strict about timing.
@@ -81,8 +84,13 @@ defmodule Membrane.HLS.SinkBin do
       spec: boolean(),
       default: false,
       description: """
-      When enabled, trims leading content on startup so all input tracks start in tighter temporal
-      alignment before segmentation.
+      When enabled, trims leading content once on startup before segmentation.
+
+      If at least one H264 track is present, the cut point is selected on H264 keyframes.
+      The aligner picks the earliest keyframe for which all non-H264 tracks have already
+      started (`first_ts <= cut_point`). If needed, it waits for later keyframes.
+
+      Without H264 tracks, the cut point is the latest first cuttable timestamp across inputs.
 
       For H264 tracks this requires parsed AU-aligned input with keyframe metadata
       (typically from `Membrane.H264.Parser`).
@@ -100,6 +108,8 @@ defmodule Membrane.HLS.SinkBin do
       default: 2_000,
       description: """
       Maximum number of buffers queued per track while waiting for startup alignment.
+      This guard is especially relevant when late non-H264 tracks force waiting for a later
+      H264 keyframe cut point.
       """
     ]
   )
