@@ -50,9 +50,9 @@ defmodule Membrane.HLS.SinkBin do
       spec: :vod | {:event, Membrane.Time.t()} | {:sliding, pos_integer(), Membrane.Time.t()},
       default: :vod,
       description: """
-      * :vod -> Segments are synced as soon as the next segment group is ready.
-      * {:event, safety_delay} -> Live event playlist, synced each target segment duration.
-      * {:sliding, max_segments, safety_delay} -> Live playlist with rolling window.
+      * `:vod` - Segments are synced as soon as the next segment group is ready.
+      * `{:event, safety_delay}` - Live event playlist, synced each target segment duration.
+      * `{:sliding, max_segments, safety_delay}` - Live playlist with rolling window.
       """
     ],
     resume?: [

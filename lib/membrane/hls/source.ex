@@ -52,8 +52,8 @@ defmodule Membrane.HLS.Source do
       description: "URI of the media playlist"
     ],
     stream_format: [
-      spec: Format.PackedAudio.t() | Format.WebVTT.t() | Format.MPEG.t(),
-      description: "Stream format describing the media playlist contents"
+      spec: struct(),
+      description: "Stream format describing the media playlist contents (`%Membrane.HLS.Format.PackedAudio{}`, `%Membrane.HLS.Format.WebVTT{}`, or `%Membrane.HLS.Format.MPEG{}`)"
     ],
     poll_interval_ms: [
       spec: non_neg_integer() | nil,
