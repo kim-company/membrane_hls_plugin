@@ -73,7 +73,7 @@ defmodule Membrane.HLS.SinkBinGuardrailsTest do
           container: :TS,
           segment_duration: Membrane.Time.seconds(1),
           build_stream: fn _format ->
-            %HLS.VariantStream{uri: nil, bandwidth: 900_000, codecs: ["avc1.64001f"]}
+            %HLS.VariantStream{uri: nil}
           end
         ]
       )

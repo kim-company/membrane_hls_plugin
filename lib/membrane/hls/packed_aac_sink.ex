@@ -33,6 +33,7 @@ defmodule Membrane.HLS.PackedAACSink do
       |> Ratio.ceil()
 
     stream = state.opts.build_stream.(format)
+    Membrane.HLS.maybe_warn_deprecated_stream_fields(track_id, stream)
 
     info = %{
       mp4a: %{
@@ -48,7 +49,8 @@ defmodule Membrane.HLS.PackedAACSink do
       codecs: codecs,
       stream: stream,
       segment_extension: ".aac",
-      target_segment_duration: target_segment_duration
+      target_segment_duration: target_segment_duration,
+      codecs_complete?: true
     ]
 
     {[notify_parent: {:packager_add_track, track_id, add_track_opts}], state}

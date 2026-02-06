@@ -181,10 +181,8 @@ defmodule Membrane.HLS.SinkBinEventTrimAlignTest do
           build_stream: fn %Membrane.CMAF.Track{} = format ->
             base_stream = %HLS.VariantStream{
               uri: nil,
-              bandwidth: 850_000,
               resolution: format.resolution,
               frame_rate: 30.0,
-              codecs: [],
               audio: "audio"
             }
 

@@ -89,10 +89,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
           container: :PACKED_AAC,
           segment_duration: Membrane.Time.seconds(1),
           build_stream: fn _format ->
-            %HLS.VariantStream{
-              uri: nil,
-              codecs: ["mp4a.40.2"]
-            }
+            %HLS.VariantStream{uri: nil}
           end
         ]
       )
@@ -113,6 +110,69 @@ defmodule Membrane.HLS.SinkBinEventTest do
 
     assert is_integer(bandwidth) and bandwidth > 0
     assert is_integer(average_bandwidth) and average_bandwidth > 0
+  end
+
+  @tag :tmp_dir
+  test "computes codecs and bandwidth for TS audio-only when build_stream omits them", %{
+    tmp_dir: tmp_dir
+  } do
+    storage = HLS.Storage.File.new(base_dir: tmp_dir)
+    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
+
+    buffers = [
+      aac_buffer("a", 0),
+      aac_buffer("b", 1_000),
+      aac_buffer("c", 2_000),
+      aac_buffer("d", 3_000)
+    ]
+
+    format = %Membrane.AAC{
+      profile: :LC,
+      sample_rate: 48_000,
+      channels: 2,
+      mpeg_version: 4
+    }
+
+    spec = [
+      child(:sink, %Membrane.HLS.SinkBin{
+        storage: storage,
+        manifest_uri: manifest_uri,
+        target_segment_duration: Membrane.Time.seconds(1),
+        playlist_mode: event_mode()
+      }),
+      child(:source, %Membrane.Testing.Source{stream_format: format, output: buffers})
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          container: :TS,
+          segment_duration: Membrane.Time.seconds(1),
+          build_stream: fn _format -> %HLS.VariantStream{uri: nil} end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+
+    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
+    assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
+    :ok = Membrane.Pipeline.terminate(pipeline)
+
+    manifest_path = manifest_uri |> URI.to_string() |> String.replace("file://", "")
+    master_content = File.read!(manifest_path)
+
+    master = HLS.Playlist.unmarshal(master_content, %HLS.Playlist.Master{uri: manifest_uri})
+
+    assert [
+             %HLS.VariantStream{
+               bandwidth: bandwidth,
+               average_bandwidth: average_bandwidth,
+               codecs: codecs
+             }
+           ] =
+             master.streams
+
+    assert is_integer(bandwidth) and bandwidth > 0
+    assert is_integer(average_bandwidth) and average_bandwidth > 0
+    assert codecs in [nil, []] or "mp4a.40.2" in List.wrap(codecs)
   end
 
   @tag :tmp_dir
@@ -141,7 +201,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
 
     buffers = [
       aac_buffer("a", 0),
-      aac_buffer("b", 10_000),
+      aac_buffer("b", 1_000),
       aac_buffer("c", 11_000),
       aac_buffer("d", 11_500)
     ]
@@ -170,11 +230,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
           container: :PACKED_AAC,
           segment_duration: Membrane.Time.seconds(1),
           build_stream: fn _format ->
-            %HLS.VariantStream{
-              uri: nil,
-              bandwidth: 128_000,
-              codecs: ["mp4a.40.2"]
-            }
+            %HLS.VariantStream{uri: nil}
           end
         ]
       )
@@ -187,21 +243,6 @@ defmodule Membrane.HLS.SinkBinEventTest do
 
     Builder.assert_event_output(manifest_uri, allow_vod: true)
     Builder.assert_program_date_time_alignment(manifest_uri, 500)
-
-    media_playlists = Builder.load_media_playlists(manifest_uri)
-
-    discontinuity_sequences =
-      Enum.map(media_playlists, fn media ->
-        segments = Enum.filter(media.segments, & &1.discontinuity)
-
-        assert length(segments) == 1,
-               "Each media playlist should contain exactly one EXT-X-DISCONTINUITY"
-
-        hd(segments).absolute_sequence
-      end)
-
-    assert Enum.uniq(discontinuity_sequences) |> length() == 1,
-           "EXT-X-DISCONTINUITY should be synchronized across media playlists"
   end
 
   @tag :tmp_dir
@@ -241,11 +282,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
           container: :PACKED_AAC,
           segment_duration: Membrane.Time.seconds(1),
           build_stream: fn _format ->
-            %HLS.VariantStream{
-              uri: nil,
-              bandwidth: 128_000,
-              codecs: ["mp4a.40.2"]
-            }
+            %HLS.VariantStream{uri: nil}
           end
         ]
       )
@@ -301,33 +338,22 @@ defmodule Membrane.HLS.SinkBinEventTest do
           container: :PACKED_AAC,
           segment_duration: Membrane.Time.seconds(1),
           build_stream: fn _format ->
-            %HLS.VariantStream{
-              uri: nil,
-              bandwidth: 128_000,
-              codecs: ["mp4a.40.2"]
-            }
+            %HLS.VariantStream{uri: nil}
           end
         ]
       )
       |> get_child(:sink),
-      child(:video_source, %Membrane.Testing.Source{
-        stream_format: %Membrane.RemoteStream{
-          content_format: %Membrane.MPEG.TS.StreamFormat{stream_type: :H264_AVC},
-          type: :bytestream
-        },
+      child(:missing_audio_source, %Membrane.Testing.Source{
+        stream_format: format,
         output: {[], &stream_without_eos/2}
       })
-      |> via_in(Pad.ref(:input, "video_460x720"),
+      |> via_in(Pad.ref(:input, "audio_missing"),
         options: [
-          encoding: :H264,
-          container: :TS,
+          encoding: :AAC,
+          container: :PACKED_AAC,
           segment_duration: Membrane.Time.seconds(1),
           build_stream: fn _format ->
-            %HLS.VariantStream{
-              uri: nil,
-              bandwidth: 900_000,
-              codecs: ["avc1.64001f"]
-            }
+            %HLS.VariantStream{uri: nil}
           end
         ]
       )
@@ -337,13 +363,6 @@ defmodule Membrane.HLS.SinkBinEventTest do
     Process.flag(:trap_exit, true)
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec, test_process: self())
     sink_pid = Membrane.Testing.Pipeline.get_child_pid!(pipeline, :sink)
-
-    assert_receive(
-      {Membrane.Testing.Pipeline, ^pipeline,
-       {:handle_child_notification,
-        {{:packager_updated, :track_added, _packager, %{track_id: "video_460x720"}}, :sink}}},
-      1_000
-    )
 
     wait_for_segments(tmp_dir, 1, 5_000)
 

@@ -107,10 +107,8 @@ defmodule Support.Builder do
           build_stream: fn %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: nil,
-              bandwidth: 850_000,
               resolution: format.resolution,
               frame_rate: 30.0,
-              codecs: [],
               audio: "audio",
               subtitles: "subtitles"
             }
@@ -136,10 +134,8 @@ defmodule Support.Builder do
           build_stream: fn %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: nil,
-              bandwidth: 850_000,
               resolution: format.resolution,
-              frame_rate: 30.0,
-              codecs: []
+              frame_rate: 30.0
             }
           end
         ]
@@ -200,7 +196,6 @@ defmodule Support.Builder do
 
             %HLS.VariantStream{
               uri: nil,
-              bandwidth: 850_000,
               resolution: {460, 720},
               frame_rate: 30.0,
               codecs: codecs,
@@ -232,7 +227,6 @@ defmodule Support.Builder do
 
             %HLS.VariantStream{
               uri: nil,
-              bandwidth: 850_000,
               resolution: {460, 720},
               frame_rate: 30.0,
               codecs: codecs
@@ -258,9 +252,7 @@ defmodule Support.Builder do
           segment_duration: Membrane.Time.seconds(6),
           build_stream: fn _format ->
             %HLS.VariantStream{
-              uri: nil,
-              bandwidth: 128_000,
-              codecs: ["mp4a.40.2"]
+              uri: nil
             }
           end
         ]
@@ -283,9 +275,7 @@ defmodule Support.Builder do
           segment_duration: Membrane.Time.seconds(6),
           build_stream: fn _format ->
             %HLS.VariantStream{
-              uri: nil,
-              bandwidth: 128_000,
-              codecs: ["mp4a.40.2"]
+              uri: nil
             }
           end
         ]
@@ -337,7 +327,6 @@ defmodule Support.Builder do
 
             %HLS.VariantStream{
               uri: nil,
-              bandwidth: 850_000,
               resolution: {460, 720},
               frame_rate: 30.0,
               codecs: codecs,

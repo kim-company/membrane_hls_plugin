@@ -148,7 +148,8 @@ defmodule Membrane.HLS.SinkBin do
       ],
       build_stream: [
         spec: (track() -> HLS.VariantStream.t() | HLS.AlternativeRendition.t()),
-        description: "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`."
+        description:
+          "Build either a `HLS.VariantStream` or a `HLS.AlternativeRendition`. `VariantStream.bandwidth` and `VariantStream.codecs` are deprecated and are now computed automatically when possible."
       ],
       segment_duration: [
         spec: Membrane.Time.t(),

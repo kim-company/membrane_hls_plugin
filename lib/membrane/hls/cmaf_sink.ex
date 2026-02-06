@@ -32,11 +32,15 @@ defmodule Membrane.HLS.CMAFSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
+    stream = state.opts.build_stream.(format)
+    Membrane.HLS.maybe_warn_deprecated_stream_fields(track_id, stream)
+
     add_track_opts = [
       codecs: Membrane.HLS.serialize_codecs(format.codecs),
-      stream: state.opts.build_stream.(format),
+      stream: stream,
       segment_extension: ".m4s",
-      target_segment_duration: target_segment_duration
+      target_segment_duration: target_segment_duration,
+      codecs_complete?: true
     ]
 
     actions = [

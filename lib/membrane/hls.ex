@@ -1,4 +1,28 @@
 defmodule Membrane.HLS do
+  require Logger
+
+  def maybe_warn_deprecated_stream_fields(_track_id, stream)
+      when not is_struct(stream, HLS.VariantStream),
+      do: :ok
+
+  def maybe_warn_deprecated_stream_fields(track_id, %HLS.VariantStream{} = stream) do
+    if stream.bandwidth do
+      Logger.warning(
+        "[DEPRECATED] build_stream for track #{inspect(track_id)} sets VariantStream.bandwidth. " <>
+          "Bandwidth is now computed automatically by SinkBin/Packager and user-provided values are ignored over time."
+      )
+    end
+
+    if stream.codecs not in [nil, []] do
+      Logger.warning(
+        "[DEPRECATED] build_stream for track #{inspect(track_id)} sets VariantStream.codecs. " <>
+          "CODECS are now computed automatically from stream formats when available."
+      )
+    end
+
+    :ok
+  end
+
   def serialize_codecs(codecs) do
     codecs
     |> Enum.map(&serialize_codec(&1))

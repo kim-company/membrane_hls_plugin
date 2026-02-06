@@ -32,26 +32,37 @@ defmodule Membrane.HLS.TSSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
-    {codecs, stream} =
+    {stream, legacy_codecs} =
       case state.opts.build_stream.(format) do
-        {format, stream} ->
+        {aac_format, stream} ->
           info = %{
             mp4a: %{
-              aot_id: Membrane.AAC.profile_to_aot_id(format.profile),
-              channels: Membrane.AAC.channels_to_channel_config_id(format.channels),
-              frequency: format.sample_rate
+              aot_id: Membrane.AAC.profile_to_aot_id(aac_format.profile),
+              channels: Membrane.AAC.channels_to_channel_config_id(aac_format.channels),
+              frequency: aac_format.sample_rate
             }
           }
 
-          codecs = Membrane.HLS.serialize_codecs(info)
-          {codecs, stream}
+          {stream, Membrane.HLS.serialize_codecs(info)}
 
         stream ->
-          {Map.get(stream, Access.key!(:codecs), []), stream}
+          {stream, List.wrap(Map.get(stream, :codecs))}
+      end
+
+    Membrane.HLS.maybe_warn_deprecated_stream_fields(track_id, stream)
+
+    {derived_codecs, derived_complete?} = derive_codecs_from_ts_format(format)
+
+    {codecs, codecs_complete?} =
+      cond do
+        derived_complete? -> {derived_codecs, true}
+        derived_codecs == [] and legacy_codecs != [] -> {legacy_codecs, true}
+        true -> {derived_codecs, false}
       end
 
     add_track_opts = [
       codecs: codecs,
+      codecs_complete?: codecs_complete?,
       stream: stream,
       segment_extension: ".ts",
       target_segment_duration: target_segment_duration
@@ -75,4 +86,50 @@ defmodule Membrane.HLS.TSSink do
 
     {actions, state}
   end
+
+  defp derive_codecs_from_ts_format(%Membrane.RemoteStream{content_format: content_format})
+       when is_struct(content_format, Membrane.MPEG.TS.StreamFormat) do
+    streams = Map.get(content_format, :elementary_streams, [])
+
+    if streams == [] do
+      {[], false}
+    else
+      codecs =
+        streams
+        |> Enum.flat_map(fn stream ->
+          stream
+          |> Map.get(:upstream_format)
+          |> serialize_upstream_codec()
+        end)
+        |> Enum.uniq()
+
+      complete? =
+        Enum.all?(streams, fn stream ->
+          stream
+          |> Map.get(:upstream_format)
+          |> codec_known?()
+        end)
+
+      {codecs, complete?}
+    end
+  end
+
+  defp derive_codecs_from_ts_format(_format), do: {[], false}
+
+  defp codec_known?(%Membrane.AAC{}), do: true
+  defp codec_known?(_other), do: false
+
+  defp serialize_upstream_codec(%Membrane.AAC{} = format) do
+    info = %{
+      mp4a: %{
+        aot_id: Membrane.AAC.profile_to_aot_id(format.profile),
+        channels: Membrane.AAC.channels_to_channel_config_id(format.channels),
+        frequency: format.sample_rate
+      }
+    }
+
+    Membrane.HLS.serialize_codecs(info)
+  end
+
+  defp serialize_upstream_codec(_format), do: []
 end

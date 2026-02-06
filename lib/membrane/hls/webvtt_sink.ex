@@ -32,10 +32,14 @@ defmodule Membrane.HLS.WebVTTSink do
       Membrane.Time.as_seconds(state.opts.target_segment_duration, :exact)
       |> Ratio.ceil()
 
+    stream = state.opts.build_stream.(format)
+    Membrane.HLS.maybe_warn_deprecated_stream_fields(track_id, stream)
+
     add_track_opts = [
-      stream: state.opts.build_stream.(format),
+      stream: stream,
       segment_extension: ".vtt",
-      target_segment_duration: target_segment_duration
+      target_segment_duration: target_segment_duration,
+      codecs_complete?: false
     ]
 
     {[notify_parent: {:packager_add_track, track_id, add_track_opts}], state}

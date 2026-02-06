@@ -32,6 +32,8 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
 
 ### Advanced Features
 - **Codec Serialization**: Automatic codec string generation (avc1, hvc1, mp4a)
+- **Automatic Master Metadata**: BANDWIDTH/AVERAGE-BANDWIDTH and CODECS are computed by SinkBin/Packager when possible
+- **Deprecation Notice**: Manually setting `HLS.VariantStream.bandwidth` and `HLS.VariantStream.codecs` in `build_stream` is deprecated
 - **Segment Management**: Configurable target segment durations
 - **Multi-track Support**: Audio, video, and subtitle tracks in single pipeline
 

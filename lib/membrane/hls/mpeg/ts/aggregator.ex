@@ -38,6 +38,11 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
   end
 
   @impl true
+  def handle_stream_format(:input, format, _ctx, state) do
+    {[stream_format: {:output, format}], state}
+  end
+
+  @impl true
   def handle_end_of_stream(:input, _ctx, state = %{acc: []}) do
     {[end_of_stream: :output], state}
   end
@@ -123,6 +128,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
       [state.pat_pmt.pmt, state.pat_pmt.pat]
       |> Enum.reject(&is_nil/1)
       |> Enum.map(&retime_psi(&1, buffer))
+
     buffer_ts = Membrane.Buffer.get_dts_or_pts(buffer)
 
     state
@@ -164,6 +170,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
         nil -> last_ts - state.ts
         last_duration -> last_ts + last_duration - state.ts
       end
+
     finalize_segment(state, duration)
   end
 
@@ -198,5 +205,4 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
 
     {buffer, state}
   end
-
 end

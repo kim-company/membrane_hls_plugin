@@ -34,6 +34,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, false}, 10_000)
+
     wait_for_track_segments(
       tmp_dir,
       [
@@ -42,6 +43,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
       ],
       5_000
     )
+
     send_syncs(pipeline, 3)
     wait_for_master_playlist(tmp_dir, 5_000)
 
@@ -69,6 +71,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
 
     pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, false}, 10_000)
+
     wait_for_track_segments(
       tmp_dir,
       [
@@ -77,6 +80,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
       ],
       5_000
     )
+
     send_syncs(pipeline, 3)
     wait_for_master_playlist(tmp_dir, 5_000)
 
@@ -151,9 +155,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
           segment_duration: Membrane.Time.seconds(1),
           build_stream: fn _format ->
             %HLS.VariantStream{
-              uri: nil,
-              bandwidth: 128_000,
-              codecs: ["mp4a.40.2"]
+              uri: nil
             }
           end
         ]
@@ -310,8 +312,12 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
     Stream.repeatedly(fn -> fun.() end)
     |> Enum.reduce_while(:timeout, fn ready?, _acc ->
       cond do
-        ready? -> {:halt, :ok}
-        System.monotonic_time(:millisecond) > deadline -> {:halt, :timeout}
+        ready? ->
+          {:halt, :ok}
+
+        System.monotonic_time(:millisecond) > deadline ->
+          {:halt, :timeout}
+
         true ->
           Process.sleep(50)
           {:cont, :timeout}

@@ -24,7 +24,7 @@ defmodule Pipeline do
         url: "rtmp://0.0.0.0:1935/app/stream_key"
       })
       |> child(:transcoder, Membrane.FFmpeg.Transcoder),
-      
+
       # Sink
       child(:sink, %Membrane.HLS.SinkBin{
         storage: storage,
@@ -61,17 +61,19 @@ defmodule Pipeline do
 
       # Video HD
       get_child(:transcoder)
-      |> via_out(:video, options: [
-        resolution: {-2, 720},
-        bitrate: 3_300_000,
-        profile: :high,
-        fps: 30,
-        gop_size: 60,
-        b_frames: 3,
-        crf: 26,
-        preset: :veryfast,
-        tune: :zerolatency
-      ])
+      |> via_out(:video,
+        options: [
+          resolution: {-2, 720},
+          bitrate: 3_300_000,
+          profile: :high,
+          fps: 30,
+          gop_size: 60,
+          b_frames: 3,
+          crf: 26,
+          preset: :veryfast,
+          tune: :zerolatency
+        ]
+      )
       |> child({:parser, :hd}, %Membrane.H264.Parser{
         output_stream_structure: :avc1,
         output_alignment: :au
@@ -83,7 +85,6 @@ defmodule Pipeline do
           build_stream: fn %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: nil,
-              bandwidth: 3951200,
               resolution: format.resolution,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
               audio: "program_audio"
@@ -95,17 +96,19 @@ defmodule Pipeline do
 
       # Video SD
       get_child(:transcoder)
-      |> via_out(:video, options: [
-        resolution: {-2, 360},
-        bitrate: 1020800,
-        profile: :main,
-        fps: 15,
-        gop_size: 30,
-        b_frames: 3,
-        crf: 26,
-        preset: :veryfast,
-        tune: :zerolatency
-      ])
+      |> via_out(:video,
+        options: [
+          resolution: {-2, 360},
+          bitrate: 1_020_800,
+          profile: :main,
+          fps: 15,
+          gop_size: 30,
+          b_frames: 3,
+          crf: 26,
+          preset: :veryfast,
+          tune: :zerolatency
+        ]
+      )
       |> child({:parser, :sd}, %Membrane.H264.Parser{
         output_stream_structure: :avc1,
         output_alignment: :au
@@ -117,7 +120,6 @@ defmodule Pipeline do
           build_stream: fn %Membrane.CMAF.Track{} = format ->
             %HLS.VariantStream{
               uri: nil,
-              bandwidth: 1_200_000,
               resolution: format.resolution,
               codecs: Membrane.HLS.serialize_codecs(format.codecs),
               audio: "program_audio"
