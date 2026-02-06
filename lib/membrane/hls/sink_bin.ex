@@ -760,7 +760,8 @@ defmodule Membrane.HLS.SinkBin do
       case Packager.put_segment(state.packager, track_id,
              duration: duration,
              pts: pts,
-             dts: dts
+             dts: dts,
+             size_bytes: IO.iodata_length(payload)
            ) do
         {packager, actions} ->
           state

@@ -26,6 +26,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
 
     pipeline =
       Membrane.Testing.Pipeline.start_link_supervised!(spec: spec, test_process: self())
+
     assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
     :ok = Membrane.Pipeline.terminate(pipeline)
 
@@ -50,6 +51,68 @@ defmodule Membrane.HLS.SinkBinEventTest do
 
     Builder.assert_event_output(manifest_uri, allow_vod: true)
     Builder.assert_program_date_time_alignment(manifest_uri, 500)
+  end
+
+  @tag :tmp_dir
+  test "computes variant bandwidths when build_stream omits them", %{tmp_dir: tmp_dir} do
+    storage = HLS.Storage.File.new(base_dir: tmp_dir)
+    manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
+
+    buffers = [
+      aac_buffer("a", 0),
+      aac_buffer("b", 1_000),
+      aac_buffer("c", 2_000),
+      aac_buffer("d", 3_000)
+    ]
+
+    format = %Membrane.AAC{
+      profile: :LC,
+      sample_rate: 48_000,
+      channels: 2,
+      mpeg_version: 4
+    }
+
+    spec = [
+      child(:sink, %Membrane.HLS.SinkBin{
+        storage: storage,
+        manifest_uri: manifest_uri,
+        target_segment_duration: Membrane.Time.seconds(1),
+        playlist_mode: event_mode()
+      }),
+      child(:source, %Membrane.Testing.Source{
+        stream_format: format,
+        output: buffers
+      })
+      |> via_in(Pad.ref(:input, "audio_128k"),
+        options: [
+          encoding: :AAC,
+          container: :PACKED_AAC,
+          segment_duration: Membrane.Time.seconds(1),
+          build_stream: fn _format ->
+            %HLS.VariantStream{
+              uri: nil,
+              codecs: ["mp4a.40.2"]
+            }
+          end
+        ]
+      )
+      |> get_child(:sink)
+    ]
+
+    pipeline = Membrane.Testing.Pipeline.start_link_supervised!(spec: spec)
+    assert_pipeline_notified(pipeline, :sink, {:end_of_stream, true}, 10_000)
+    :ok = Membrane.Pipeline.terminate(pipeline)
+
+    manifest_path = manifest_uri |> URI.to_string() |> String.replace("file://", "")
+    master_content = File.read!(manifest_path)
+
+    master = HLS.Playlist.unmarshal(master_content, %HLS.Playlist.Master{uri: manifest_uri})
+
+    assert [%HLS.VariantStream{bandwidth: bandwidth, average_bandwidth: average_bandwidth}] =
+             master.streams
+
+    assert is_integer(bandwidth) and bandwidth > 0
+    assert is_integer(average_bandwidth) and average_bandwidth > 0
   end
 
   @tag :tmp_dir
@@ -417,8 +480,12 @@ defmodule Membrane.HLS.SinkBinEventTest do
     Stream.repeatedly(fn -> fun.() end)
     |> Enum.reduce_while(:timeout, fn ready?, _acc ->
       cond do
-        ready? -> {:halt, :ok}
-        System.monotonic_time(:millisecond) > deadline -> {:halt, :timeout}
+        ready? ->
+          {:halt, :ok}
+
+        System.monotonic_time(:millisecond) > deadline ->
+          {:halt, :timeout}
+
         true ->
           Process.sleep(50)
           {:cont, :timeout}
