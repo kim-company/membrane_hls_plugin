@@ -175,7 +175,7 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
 
     [media] = Builder.load_media_playlists(manifest_uri)
 
-    assert length(media.segments) <= 2, "Media playlist should keep rolling window"
+    assert_window_constraints(media, 2)
 
     Enum.each(media.segments, fn segment ->
       assert segment.program_date_time != nil,
@@ -191,11 +191,11 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
     :ok = Membrane.Pipeline.terminate(pipeline)
   end
 
-  defp assert_sliding_window(manifest_uri, max_segments) do
+  defp assert_sliding_window(manifest_uri, configured_max_segments) do
     Builder.load_media_playlists(manifest_uri)
     |> Enum.each(fn media ->
       assert media.finished == false, "Sliding playlists should not be finished"
-      assert length(media.segments) <= max_segments, "Sliding window exceeded max segments"
+      assert_window_constraints(media, configured_max_segments)
 
       case media.segments do
         [] ->
@@ -213,6 +213,23 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
           assert media.media_sequence_number <= last_sequence
       end
     end)
+  end
+
+  defp assert_window_constraints(media, configured_max_segments) do
+    segment_count = length(media.segments)
+
+    if segment_count <= configured_max_segments do
+      :ok
+    else
+      min_duration = 3 * media.target_segment_duration
+      total_duration = Enum.reduce(media.segments, 0.0, &(&1.duration + &2))
+
+      [oldest | _rest] = media.segments
+      duration_after_dropping_oldest = total_duration - oldest.duration
+
+      assert total_duration < min_duration or duration_after_dropping_oldest < min_duration,
+             "Sliding window kept too many segments without RFC-8216 duration justification"
+    end
   end
 
   defp aac_buffer(payload, pts_ms) do

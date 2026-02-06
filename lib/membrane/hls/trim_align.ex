@@ -75,7 +75,9 @@ defmodule Membrane.HLS.TrimAlign do
       cut_strategy: ctx.pad_options[:cut_strategy] || :any,
       cut_candidate: nil,
       first_ts: nil,
-      started?: false
+      started?: false,
+      ended?: false,
+      eos_sent?: false
     }
 
     {[], put_in(state, [:pads, pad], pad_state)}
@@ -112,7 +114,9 @@ defmodule Membrane.HLS.TrimAlign do
 
     state = put_in(state, [:pads, pad], updated_pad_state)
 
-    maybe_establish_alignment(state)
+    state
+    |> maybe_establish_alignment()
+    |> maybe_emit_pending_eos()
   end
 
   def handle_buffer(pad, buffer, _ctx, state) do
@@ -121,8 +125,16 @@ defmodule Membrane.HLS.TrimAlign do
 
   @impl true
   def handle_end_of_stream(pad, _ctx, state) do
-    {actions, state} = maybe_establish_alignment(state)
-    {actions ++ [end_of_stream: output_pad(pad)], state}
+    state = update_in(state, [:pads, pad], &Map.put(&1, :ended?, true))
+
+    if is_integer(state.alignment_reference) do
+      state = update_in(state, [:pads, pad], &Map.put(&1, :eos_sent?, true))
+      {[end_of_stream: output_pad(pad)], state}
+    else
+      state
+      |> maybe_establish_alignment()
+      |> maybe_emit_pending_eos()
+    end
   end
 
   defp maybe_establish_alignment(%{alignment_reference: reference} = state)
@@ -152,6 +164,25 @@ defmodule Membrane.HLS.TrimAlign do
       end
     end
   end
+
+  defp maybe_emit_pending_eos({actions, %{alignment_reference: reference} = state})
+       when is_integer(reference) do
+    {eos_actions, pads} =
+      Enum.reduce(state.pads, {[], %{}}, fn {pad, pad_state}, {eos_acc, pads_acc} ->
+        if pad_state.ended? and not pad_state.eos_sent? do
+          {
+            [{:end_of_stream, output_pad(pad)} | eos_acc],
+            Map.put(pads_acc, pad, %{pad_state | eos_sent?: true})
+          }
+        else
+          {eos_acc, Map.put(pads_acc, pad, pad_state)}
+        end
+      end)
+
+    {actions ++ Enum.reverse(eos_actions), %{state | pads: pads}}
+  end
+
+  defp maybe_emit_pending_eos(result), do: result
 
   defp build_alignment_actions(state, reference) do
     with {:ok, initial_selection} <- select_buffers(state.pads, reference),
