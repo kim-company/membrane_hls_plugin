@@ -7,7 +7,8 @@ defmodule Membrane.HLS.SinkBin do
   - Upstream must provide monotonic, accurate PTS/DTS per track.
   - Tracks that produce segments at a given sync point must be aligned in time
     (minor AAC/H264 cut differences are tolerated within packager tolerance).
-  - The sink does not shift, trim, or otherwise repair timestamps.
+  - By default, the sink does not shift or trim timestamps.
+  - Optional startup alignment trimming can be enabled with `:trim_align?`.
 
   ## Operational modes
   - `:vod` syncs whenever the next segment group is ready and is strict about timing.
@@ -75,6 +76,31 @@ defmodule Membrane.HLS.SinkBin do
       Automatically flush the packager when all streams ended.
       Set to `false` if flushing manually (via `:flush` notification).
       """
+    ],
+    trim_align?: [
+      spec: boolean(),
+      default: false,
+      description: """
+      When enabled, trims leading content on startup so all input tracks start in tighter temporal
+      alignment before segmentation.
+
+      For H264 tracks this requires parsed AU-aligned input with keyframe metadata
+      (typically from `Membrane.H264.Parser`).
+      """
+    ],
+    trim_align_max_leading_trim: [
+      spec: Membrane.Time.t(),
+      default: Membrane.Time.seconds(3),
+      description: """
+      Maximum amount of leading media that can be removed from a single track while aligning.
+      """
+    ],
+    trim_align_max_queued_buffers: [
+      spec: pos_integer(),
+      default: 2_000,
+      description: """
+      Maximum number of buffers queued per track while waiting for startup alignment.
+      """
     ]
   )
 
@@ -135,17 +161,30 @@ defmodule Membrane.HLS.SinkBin do
 
   @impl true
   def handle_init(_context, opts) do
-    {[],
+    actions =
+      if opts.trim_align? do
+        [
+          spec:
+            child(:trim_aligner, %Membrane.HLS.TrimAlign{
+              max_leading_trim: opts.trim_align_max_leading_trim,
+              max_queued_buffers: opts.trim_align_max_queued_buffers
+            })
+        ]
+      else
+        []
+      end
+
+    {actions,
      %{
        opts: opts,
-        packager: nil,
-        storage: opts.storage,
-        flush: opts.flush_on_end,
-        ended_sinks: MapSet.new(),
-        mode: build_mode(opts),
-        expected_tracks: MapSet.new(),
-        time_discovery: %{}
-      }}
+       packager: nil,
+       storage: opts.storage,
+       flush: opts.flush_on_end,
+       ended_sinks: MapSet.new(),
+       mode: build_mode(opts),
+       expected_tracks: MapSet.new(),
+       time_discovery: %{}
+     }}
   end
 
   @impl true
@@ -165,13 +204,15 @@ defmodule Membrane.HLS.SinkBin do
 
   def handle_child_notification({:packager_add_track, track_id, opts}, _child, _ctx, state) do
     {packager, []} = Packager.add_track(state.packager, track_id, opts)
+
     state =
       state
       |> Map.put(:packager, packager)
       |> update_in([:expected_tracks], &MapSet.delete(&1, track_id))
 
     {[
-       notify_parent: {:packager_updated, :track_added, packager, %{track_id: track_id, opts: opts}}
+       notify_parent:
+         {:packager_updated, :track_added, packager, %{track_id: track_id, opts: opts}}
      ], state}
   end
 
@@ -226,7 +267,7 @@ defmodule Membrane.HLS.SinkBin do
         state
       ) do
     spec =
-      bin_input(pad)
+      input_with_optional_trim(pad, track_id, state, :AAC)
       |> child({:aggregator, track_id}, %Membrane.HLS.AAC.Aggregator{
         target_duration: pad_opts.segment_duration
       })
@@ -247,7 +288,7 @@ defmodule Membrane.HLS.SinkBin do
         state
       ) do
     spec =
-      bin_input(pad)
+      input_with_optional_trim(pad, track_id, state, :AAC)
       |> via_in(:input, options: [stream_type: :AAC_ADTS])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.HLS.MPEG.TS.Aggregator{
@@ -270,7 +311,7 @@ defmodule Membrane.HLS.SinkBin do
         state
       ) do
     spec =
-      bin_input(pad)
+      input_with_optional_trim(pad, track_id, state, :AAC)
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
         segment_min_duration: pad_opts.segment_duration
@@ -293,7 +334,7 @@ defmodule Membrane.HLS.SinkBin do
         state
       ) do
     spec =
-      bin_input(pad)
+      input_with_optional_trim(pad, track_id, state, :H264)
       |> via_in(:input, options: [stream_type: :H264_AVC])
       |> child({:muxer, track_id}, Membrane.MPEG.TS.Muxer)
       |> child({:aggregator, track_id}, %Membrane.HLS.MPEG.TS.Aggregator{
@@ -316,7 +357,7 @@ defmodule Membrane.HLS.SinkBin do
         state
       ) do
     spec =
-      bin_input(pad)
+      input_with_optional_trim(pad, track_id, state, :H264)
       |> child({:duration_estimator, track_id}, Membrane.HLS.NALU.DurationEstimator)
       |> via_in(Pad.ref(:input, track_id))
       |> child({:muxer, track_id}, %Membrane.MP4.Muxer.CMAF{
@@ -340,7 +381,7 @@ defmodule Membrane.HLS.SinkBin do
         state
       ) do
     spec =
-      bin_input(pad)
+      input_with_optional_trim(pad, track_id, state, :TEXT)
       |> child({:cues, track_id}, %Membrane.WebVTT.Filter{
         min_duration: pad_opts.subtitle_min_duration
       })
@@ -458,9 +499,7 @@ defmodule Membrane.HLS.SinkBin do
         if sync_state_stopped?(state.mode) do
           {[], state}
         else
-          Membrane.Logger.debug(
-            "Packager: syncing playlists up to #{sync_state.next_sync_point}"
-          )
+          Membrane.Logger.debug("Packager: syncing playlists up to #{sync_state.next_sync_point}")
 
           state = sync_packager(state, sync_state.next_sync_point)
 
@@ -694,6 +733,21 @@ defmodule Membrane.HLS.SinkBin do
     update_state_sync_state(state, sync_state)
   end
 
+  defp input_with_optional_trim(pad, _track_id, state, _encoding)
+       when not state.opts.trim_align? do
+    bin_input(pad)
+  end
+
+  defp input_with_optional_trim(pad, track_id, _state, encoding) do
+    bin_input(pad)
+    |> via_in(Pad.ref(:input, track_id), options: [cut_strategy: trim_cut_strategy(encoding)])
+    |> get_child(:trim_aligner)
+    |> via_out(Pad.ref(:output, track_id))
+  end
+
+  defp trim_cut_strategy(:H264), do: :h264_keyframe
+  defp trim_cut_strategy(_encoding), do: :any
+
   defp register_track(state, track_id) do
     update_in(state, [:expected_tracks], &MapSet.put(&1, track_id))
   end
@@ -883,6 +937,7 @@ defmodule Membrane.HLS.SinkBin do
 
       {:error, error, packager} ->
         Membrane.Logger.error("Packager sync failed: #{inspect(error)}")
+
         state
         |> Map.put(:packager, packager)
         |> handle_packager_error(error)
