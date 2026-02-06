@@ -10,6 +10,10 @@ defmodule Membrane.HLS.TrimAlign do
   Without H264 pads, synchronization falls back to the latest first cuttable timestamp among
   all pads.
 
+  For `%Membrane.Text{}` pads, if the selected cut point lands inside a subtitle cue
+  (`buffer.pts < cut_point < buffer.metadata.to`), the first forwarded cue is clipped to start
+  exactly at the cut point instead of being dropped.
+
   H264 pads can only be trimmed at keyframe boundaries and require parser metadata
   (`%Membrane.H264{alignment: :au, nalu_in_metadata?: true}`).
   """
@@ -80,6 +84,7 @@ defmodule Membrane.HLS.TrimAlign do
       cut_strategy: ctx.pad_options[:cut_strategy] || :any,
       cut_candidate: nil,
       first_ts: nil,
+      stream_format: nil,
       started?: false,
       ended?: false,
       eos_sent?: false
@@ -92,6 +97,7 @@ defmodule Membrane.HLS.TrimAlign do
   def handle_stream_format(pad, format, _ctx, state) do
     pad_state = Map.fetch!(state.pads, pad)
     validate_stream_format!(pad_state.cut_strategy, format, pad)
+    state = put_in(state, [:pads, pad, :stream_format], format)
 
     {[stream_format: {output_pad(pad), format}], state}
   end
@@ -251,7 +257,7 @@ defmodule Membrane.HLS.TrimAlign do
   defp next_h264_cut_point(pad_state, reference) do
     buffers = :queue.to_list(pad_state.queue)
 
-    case take_from_reference(buffers, pad_state.cut_strategy, reference) do
+    case take_from_reference(buffers, pad_state, reference) do
       :not_ready -> :not_ready
       %{first_forward_ts: ts} -> ts
     end
@@ -275,9 +281,14 @@ defmodule Membrane.HLS.TrimAlign do
 
   defp h264_pad?(pad_state), do: pad_state.cut_strategy == :h264_keyframe
 
+  defp text_pad?(%{stream_format: %Membrane.Text{}}), do: true
+  defp text_pad?(_pad_state), do: false
+
   defp build_alignment_actions(state, reference) do
     with {:ok, selection} <- select_buffers(state.pads, reference),
          :ok <- validate_trim_limits(state.pads, selection, state.max_leading_trim) do
+      log_alignment_selection(state.pads, selection, reference)
+
       actions =
         selection
         |> Enum.reduce([], fn {pad, %{forward_buffers: forward_buffers}}, acc ->
@@ -301,11 +312,24 @@ defmodule Membrane.HLS.TrimAlign do
     end
   end
 
+  defp log_alignment_selection(pads, selection, reference) do
+    Membrane.Logger.info("TrimAlign cutting point found at T=#{format_time(reference)}")
+
+    Enum.each(selection, fn {pad, %{first_forward_ts: first_forward_ts}} ->
+      first_ts = Map.fetch!(pads, pad).first_ts
+      trimmed_duration = first_forward_ts - first_ts
+
+      Membrane.Logger.info(
+        "TrimAlign stream=#{inspect(pad)} trimmed=#{format_time(trimmed_duration)} (from T=#{format_time(first_ts)} to T=#{format_time(first_forward_ts)})"
+      )
+    end)
+  end
+
   defp select_buffers(pads, reference) do
     Enum.reduce_while(pads, {:ok, %{}}, fn {pad, pad_state}, {:ok, acc} ->
       buffers = :queue.to_list(pad_state.queue)
 
-      case take_from_reference(buffers, pad_state.cut_strategy, reference) do
+      case take_from_reference(buffers, pad_state, reference) do
         :not_ready -> {:halt, :not_ready}
         selection -> {:cont, {:ok, Map.put(acc, pad, selection)}}
       end
@@ -330,7 +354,21 @@ defmodule Membrane.HLS.TrimAlign do
     end)
   end
 
-  defp take_from_reference(buffers, cut_strategy, reference) do
+  defp take_from_reference(buffers, %{cut_strategy: :any} = pad_state, reference)
+       when is_list(buffers) do
+    if text_pad?(pad_state) do
+      take_text_from_reference(buffers, reference)
+    else
+      take_from_reference_by_cut_strategy(buffers, :any, reference)
+    end
+  end
+
+  defp take_from_reference(buffers, %{cut_strategy: cut_strategy}, reference)
+       when is_list(buffers) do
+    take_from_reference_by_cut_strategy(buffers, cut_strategy, reference)
+  end
+
+  defp take_from_reference_by_cut_strategy(buffers, cut_strategy, reference) do
     index =
       Enum.find_index(buffers, fn buffer ->
         ts = get_buffer_timestamp!(buffer)
@@ -351,6 +389,66 @@ defmodule Membrane.HLS.TrimAlign do
           first_forward_ts: get_buffer_timestamp!(first_forward)
         }
     end
+  end
+
+  defp take_text_from_reference(buffers, reference) do
+    index =
+      Enum.find_index(buffers, fn buffer ->
+        buffer_ts = get_buffer_timestamp!(buffer)
+
+        cond do
+          buffer_ts >= reference ->
+            true
+
+          true ->
+            text_buffer_overlaps_reference?(buffer, reference)
+        end
+      end)
+
+    case index do
+      nil ->
+        :not_ready
+
+      index ->
+        {trimmed, [first_forward | rest]} = Enum.split(buffers, index)
+        first_forward_ts_raw = get_buffer_timestamp!(first_forward)
+
+        {first_forward, first_forward_ts} =
+          case text_buffer_end_timestamp(first_forward) do
+            end_ts
+            when is_integer(end_ts) and first_forward_ts_raw < reference and end_ts > reference ->
+              {clip_text_buffer_start(first_forward, reference), reference}
+
+            _other ->
+              {first_forward, first_forward_ts_raw}
+          end
+
+        %{
+          trimmed_count: length(trimmed),
+          forward_buffers: [first_forward | rest],
+          first_forward_ts: first_forward_ts
+        }
+    end
+  end
+
+  defp text_buffer_overlaps_reference?(buffer, reference) do
+    buffer_ts = get_buffer_timestamp!(buffer)
+
+    case text_buffer_end_timestamp(buffer) do
+      end_ts when is_integer(end_ts) ->
+        buffer_ts < reference and end_ts > reference
+
+      _other ->
+        false
+    end
+  end
+
+  defp text_buffer_end_timestamp(%Buffer{metadata: %{to: to}}) when is_integer(to), do: to
+  defp text_buffer_end_timestamp(_buffer), do: nil
+
+  defp clip_text_buffer_start(%Buffer{} = buffer, reference) do
+    dts = if is_integer(buffer.dts), do: reference, else: buffer.dts
+    %{buffer | pts: reference, dts: dts}
   end
 
   defp maybe_set_first_timestamp(%{first_ts: nil} = pad_state, ts),

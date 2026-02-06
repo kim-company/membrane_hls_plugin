@@ -76,6 +76,27 @@ defmodule Membrane.HLS.SinkBinEventTrimAlignTest do
   end
 
   @tag :tmp_dir
+  test "event: long subtitles overlapping trim cut are clipped and stay aligned", %{
+    tmp_dir: tmp_dir
+  } do
+    {manifest_uri, spec} =
+      build_spec(tmp_dir,
+        include_subtitles?: true,
+        video_drop_before: Membrane.Time.seconds(2),
+        subtitle_buffers: long_text_buffers()
+      )
+
+    run_pipeline(spec)
+
+    Builder.assert_event_output(manifest_uri, allow_vod: true)
+    Builder.assert_program_date_time_alignment(manifest_uri, 700)
+
+    media_playlists = Builder.load_media_playlists(manifest_uri)
+    assert length(media_playlists) == 3
+    assert_first_segment_sequence_aligned(media_playlists)
+  end
+
+  @tag :tmp_dir
   test "event: video starts on non-keyframe, next keyframe is used and others align", %{
     tmp_dir: tmp_dir
   } do
@@ -117,6 +138,7 @@ defmodule Membrane.HLS.SinkBinEventTrimAlignTest do
     include_subtitles? = Keyword.get(opts, :include_subtitles?, false)
     video_drop_before = Keyword.get(opts, :video_drop_before, 0)
     drop_first_video_keyframe? = Keyword.get(opts, :drop_first_video_keyframe?, false)
+    subtitle_buffers = Keyword.get(opts, :subtitle_buffers, text_buffers())
 
     storage = HLS.Storage.File.new(base_dir: tmp_dir)
     manifest_uri = URI.new!("file://#{tmp_dir}/stream.m3u8")
@@ -201,7 +223,7 @@ defmodule Membrane.HLS.SinkBinEventTrimAlignTest do
         [
           child(:text_source, %Membrane.Testing.Source{
             stream_format: %Membrane.Text{},
-            output: text_buffers()
+            output: subtitle_buffers
           })
           |> via_in(Pad.ref(:input, "subtitles"),
             options: [
@@ -246,6 +268,20 @@ defmodule Membrane.HLS.SinkBinEventTrimAlignTest do
 
       %Membrane.Buffer{
         payload: "cue_#{idx}",
+        pts: Membrane.Time.milliseconds(from),
+        metadata: %{to: Membrane.Time.milliseconds(to)}
+      }
+    end)
+  end
+
+  defp long_text_buffers do
+    0..5
+    |> Enum.map(fn idx ->
+      from = idx * 4_000
+      to = from + 4_000
+
+      %Membrane.Buffer{
+        payload: "long_cue_#{idx}",
         pts: Membrane.Time.milliseconds(from),
         metadata: %{to: Membrane.Time.milliseconds(to)}
       }

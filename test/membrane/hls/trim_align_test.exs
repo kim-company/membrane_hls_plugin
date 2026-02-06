@@ -169,6 +169,122 @@ defmodule Membrane.HLS.TrimAlignTest do
     assert action_buffers_pts(actions, :subtitles) == [Membrane.Time.milliseconds(2_000)]
   end
 
+  test "clips overlapping subtitle cue to alignment cut point" do
+    state = init_align(max_leading_trim: Membrane.Time.seconds(3), max_queued_buffers: 100)
+    state = add_pad(state, :video, :h264_keyframe)
+    state = add_pad(state, :subtitles, :any)
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(
+        Pad.ref(:input, :video),
+        %Membrane.H264{alignment: :au, nalu_in_metadata?: true},
+        %{},
+        state
+      )
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(Pad.ref(:input, :subtitles), %Membrane.Text{}, %{}, state)
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(0, %{h264: %{key_frame?: false}}),
+        %{},
+        state
+      )
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(900, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(1_900, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    subtitle =
+      %Membrane.Buffer{
+        payload: "long cue",
+        pts: Membrane.Time.milliseconds(1_200),
+        metadata: %{to: Membrane.Time.milliseconds(2_400)}
+      }
+
+    {actions, _state} =
+      TrimAlign.handle_buffer(Pad.ref(:input, :subtitles), subtitle, %{}, state)
+
+    assert action_buffers_pts(actions, :video) == [Membrane.Time.milliseconds(1_900)]
+
+    [clipped_subtitle] = action_buffers(actions, :subtitles)
+    assert clipped_subtitle.pts == Membrane.Time.milliseconds(1_900)
+    assert clipped_subtitle.metadata.to == Membrane.Time.milliseconds(2_400)
+    assert clipped_subtitle.payload == "long cue"
+  end
+
+  test "text without metadata.to falls back to legacy non-overlap behavior" do
+    state = init_align(max_leading_trim: Membrane.Time.seconds(3), max_queued_buffers: 100)
+    state = add_pad(state, :video, :h264_keyframe)
+    state = add_pad(state, :subtitles, :any)
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(
+        Pad.ref(:input, :video),
+        %Membrane.H264{alignment: :au, nalu_in_metadata?: true},
+        %{},
+        state
+      )
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(Pad.ref(:input, :subtitles), %Membrane.Text{}, %{}, state)
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(0, %{h264: %{key_frame?: false}}),
+        %{},
+        state
+      )
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(900, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(1_900, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    subtitle_before_cut =
+      %Membrane.Buffer{payload: "before", pts: Membrane.Time.milliseconds(1_200), metadata: %{}}
+
+    {actions, state} =
+      TrimAlign.handle_buffer(Pad.ref(:input, :subtitles), subtitle_before_cut, %{}, state)
+
+    assert actions == []
+
+    subtitle_after_cut =
+      %Membrane.Buffer{payload: "after", pts: Membrane.Time.milliseconds(2_000), metadata: %{}}
+
+    {actions, _state} =
+      TrimAlign.handle_buffer(Pad.ref(:input, :subtitles), subtitle_after_cut, %{}, state)
+
+    assert action_buffers_pts(actions, :video) == [Membrane.Time.milliseconds(1_900)]
+    assert action_buffers_pts(actions, :subtitles) == [Membrane.Time.milliseconds(2_000)]
+  end
+
   test "raises for non parsed h264 format" do
     state = init_align(max_leading_trim: Membrane.Time.seconds(3), max_queued_buffers: 100)
     state = add_pad(state, :video, :h264_keyframe)
@@ -233,13 +349,22 @@ defmodule Membrane.HLS.TrimAlignTest do
     }
   end
 
-  defp action_buffers_pts(actions, id) do
+  defp action_buffers(actions, id) do
     Enum.find_value(actions, [], fn
       {:buffer, {pad, buffers}} when pad == Pad.ref(:output, id) and is_list(buffers) ->
-        Enum.map(buffers, & &1.pts)
+        buffers
+
+      {:buffer, {pad, %Membrane.Buffer{} = buffer}} when pad == Pad.ref(:output, id) ->
+        [buffer]
 
       _other ->
         nil
     end)
+  end
+
+  defp action_buffers_pts(actions, id) do
+    actions
+    |> action_buffers(id)
+    |> Enum.map(& &1.pts)
   end
 end
