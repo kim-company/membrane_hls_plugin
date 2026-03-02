@@ -189,16 +189,10 @@ defmodule Support.Builder do
           container: :TS,
           segment_duration: Membrane.Time.seconds(6),
           build_stream: fn _format ->
-            codecs =
-              Membrane.HLS.serialize_codecs(%{
-                avc1: %{profile: 100, level: 31, compatibility: 0}
-              })
-
             %HLS.VariantStream{
               uri: nil,
               resolution: {460, 720},
               frame_rate: 30.0,
-              codecs: codecs,
               audio: "audio",
               subtitles: "subtitles"
             }
@@ -220,16 +214,10 @@ defmodule Support.Builder do
           container: :TS,
           segment_duration: Membrane.Time.seconds(6),
           build_stream: fn _format ->
-            codecs =
-              Membrane.HLS.serialize_codecs(%{
-                avc1: %{profile: 100, level: 31, compatibility: 0}
-              })
-
             %HLS.VariantStream{
               uri: nil,
               resolution: {460, 720},
-              frame_rate: 30.0,
-              codecs: codecs
+              frame_rate: 30.0
             }
           end
         ]
@@ -320,16 +308,10 @@ defmodule Support.Builder do
           container: :TS,
           segment_duration: Membrane.Time.seconds(6),
           build_stream: fn _format ->
-            codecs =
-              Membrane.HLS.serialize_codecs(%{
-                avc1: %{profile: 100, level: 31, compatibility: 0}
-              })
-
             %HLS.VariantStream{
               uri: nil,
               resolution: {460, 720},
               frame_rate: 30.0,
-              codecs: codecs,
               audio: "audio",
               subtitles: "subtitles"
             }
@@ -338,6 +320,15 @@ defmodule Support.Builder do
       )
       |> get_child(:sink)
     ]
+  end
+
+  def assert_codecs_present(manifest_uri) do
+    {_manifest_path, master_playlist} = load_master_playlist(manifest_uri)
+
+    Enum.each(master_playlist.streams, fn stream ->
+      assert stream.codecs not in [nil, []],
+             "CODECS must be present on variant stream #{inspect(Map.get(stream, :uri))}"
+    end)
   end
 
   def assert_hls_output(manifest_uri) do

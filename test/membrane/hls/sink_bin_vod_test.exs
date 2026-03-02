@@ -42,6 +42,9 @@ defmodule Membrane.HLS.SinkBinVODTest do
 
     # Validate the generated HLS output
     Builder.assert_hls_output(manifest_uri)
+
+    # CODECS must be present on variant streams (RFC 8216 requirement)
+    Builder.assert_codecs_present(manifest_uri)
   end
 
   @tag :tmp_dir

@@ -117,6 +117,15 @@ defmodule Membrane.HLS.TSSink do
   defp derive_codecs_from_ts_format(_format), do: {[], false}
 
   defp codec_known?(%Membrane.AAC{}), do: true
+
+  defp codec_known?(%Membrane.H264{stream_structure: {avc, _dcr}})
+       when avc in [:avc1, :avc3],
+       do: true
+
+  defp codec_known?(%Membrane.H264{profile: profile, width: w, height: h})
+       when not is_nil(profile) and is_integer(w) and is_integer(h),
+       do: true
+
   defp codec_known?(_other), do: false
 
   defp serialize_upstream_codec(%Membrane.AAC{} = format) do
@@ -131,5 +140,85 @@ defmodule Membrane.HLS.TSSink do
     Membrane.HLS.serialize_codecs(info)
   end
 
+  defp serialize_upstream_codec(
+         %Membrane.H264{stream_structure: {avc, <<1, profile, compat, level, _rest::binary>>}}
+       )
+       when avc in [:avc1, :avc3] do
+    Membrane.HLS.serialize_codecs([
+      {:avc1, %{profile: profile, compatibility: compat, level: level}}
+    ])
+  end
+
+  defp serialize_upstream_codec(
+         %Membrane.H264{profile: profile, width: w, height: h} = format
+       )
+       when not is_nil(profile) and is_integer(w) and is_integer(h) do
+    profile_idc = h264_profile_idc(profile)
+    fps = h264_framerate(format.framerate)
+    level_idc = h264_min_level_idc(w, h, fps)
+
+    if profile_idc != nil and level_idc != nil do
+      compat = h264_compatibility(profile, format)
+
+      Membrane.HLS.serialize_codecs([
+        {:avc1, %{profile: profile_idc, compatibility: compat, level: level_idc}}
+      ])
+    else
+      []
+    end
+  end
+
   defp serialize_upstream_codec(_format), do: []
+
+  # Maps H264 profile atoms to profile_idc values (ITU-T H.264 Table A-1).
+  defp h264_profile_idc(:constrained_baseline), do: 66
+  defp h264_profile_idc(:baseline), do: 66
+  defp h264_profile_idc(:main), do: 77
+  defp h264_profile_idc(:high), do: 100
+  defp h264_profile_idc(:high_10), do: 110
+  defp h264_profile_idc(:high_10_intra), do: 110
+  defp h264_profile_idc(:high_422), do: 122
+  defp h264_profile_idc(:high_422_intra), do: 122
+  defp h264_profile_idc(:high_444), do: 244
+  defp h264_profile_idc(:high_444_intra), do: 244
+  defp h264_profile_idc(_), do: nil
+
+  # Derives constraint_set flags from profile where deterministic.
+  # Constrained Baseline requires constraint_set1_flag (bit 6).
+  defp h264_compatibility(:constrained_baseline, _format), do: 0xC0
+  defp h264_compatibility(_profile, _format), do: 0x00
+
+  defp h264_framerate({num, den}) when den > 0, do: num / den
+  defp h264_framerate(_nil_or_invalid), do: 30.0
+
+  # H264 level limits table (ITU-T H.264 Table A-1).
+  # Each entry: {level_idc, max_frame_size_macroblocks, max_macroblocks_per_second}
+  @h264_levels [
+    {10, 99, 1_485},
+    {11, 396, 3_000},
+    {12, 396, 6_000},
+    {13, 396, 11_880},
+    {20, 396, 11_880},
+    {21, 792, 19_800},
+    {22, 1_620, 20_250},
+    {30, 1_620, 40_500},
+    {31, 3_600, 108_000},
+    {32, 5_120, 216_000},
+    {40, 8_192, 245_760},
+    {41, 8_192, 245_760},
+    {42, 8_704, 522_240},
+    {50, 22_080, 589_824},
+    {51, 36_864, 983_040},
+    {52, 36_864, 2_073_600}
+  ]
+
+  # Derives the minimum H264 level_idc from resolution and framerate.
+  defp h264_min_level_idc(width, height, fps) do
+    fs = ceil(width / 16) * ceil(height / 16)
+    mbps = ceil(fs * fps)
+
+    Enum.find_value(@h264_levels, fn {level_idc, max_fs, max_mbps} ->
+      if fs <= max_fs and mbps <= max_mbps, do: level_idc
+    end)
+  end
 end
