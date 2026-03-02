@@ -39,7 +39,7 @@ defmodule Membrane.HLS.WebVTTSink do
       stream: stream,
       segment_extension: ".vtt",
       target_segment_duration: target_segment_duration,
-      codecs_complete?: false
+      codecs_complete?: true
     ]
 
     {[notify_parent: {:packager_add_track, track_id, add_track_opts}], state}
