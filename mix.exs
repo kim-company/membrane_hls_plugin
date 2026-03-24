@@ -4,7 +4,7 @@ defmodule Membrane.HLS.MixProject do
   def project do
     [
       app: :membrane_hls_plugin,
-      version: "2.1.7",
+      version: "2.1.8",
       elixir: "~> 1.13",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -27,7 +27,7 @@ defmodule Membrane.HLS.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:kim_hls, "~> 2.1"},
+      {:kim_hls, "~> 2.5.14"},
       {:membrane_core, "~> 1.0"},
       {:membrane_file_plugin, "~> 0.17"},
       {:membrane_mp4_plugin, "~> 0.35"},
