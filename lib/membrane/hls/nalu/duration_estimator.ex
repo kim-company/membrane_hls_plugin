@@ -32,8 +32,7 @@ defmodule Membrane.HLS.NALU.DurationEstimator do
 
         actions = [buffer: {:output, pending}]
 
-        {actions,
-         %{state | pending: buffer, last_ts: ts, last_duration: duration}}
+        {actions, %{state | pending: buffer, last_ts: ts, last_duration: duration}}
     end
   end
 
@@ -48,8 +47,7 @@ defmodule Membrane.HLS.NALU.DurationEstimator do
 
         pending = put_duration(pending, duration)
 
-        {[buffer: {:output, pending}, end_of_stream: :output],
-         %{state | pending: nil}}
+        {[buffer: {:output, pending}, end_of_stream: :output], %{state | pending: nil}}
     end
   end
 

@@ -140,18 +140,16 @@ defmodule Membrane.HLS.TSSink do
     Membrane.HLS.serialize_codecs(info)
   end
 
-  defp serialize_upstream_codec(
-         %Membrane.H264{stream_structure: {avc, <<1, profile, compat, level, _rest::binary>>}}
-       )
+  defp serialize_upstream_codec(%Membrane.H264{
+         stream_structure: {avc, <<1, profile, compat, level, _rest::binary>>}
+       })
        when avc in [:avc1, :avc3] do
     Membrane.HLS.serialize_codecs([
       {:avc1, %{profile: profile, compatibility: compat, level: level}}
     ])
   end
 
-  defp serialize_upstream_codec(
-         %Membrane.H264{profile: profile, width: w, height: h} = format
-       )
+  defp serialize_upstream_codec(%Membrane.H264{profile: profile, width: w, height: h} = format)
        when not is_nil(profile) and is_integer(w) and is_integer(h) do
     profile_idc = h264_profile_idc(profile)
     fps = h264_framerate(format.framerate)

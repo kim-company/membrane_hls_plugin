@@ -115,7 +115,13 @@ defmodule Membrane.HLS.SourceTest do
     })
 
     assert_sink_buffer(pipeline, :audio_sink, %Membrane.Buffer{payload: "audio"}, 5_000)
-    assert_sink_buffer(pipeline, :subs_sink, %Membrane.Buffer{payload: "WEBVTT\n\n00:00.000 --> 00:01.000\nhello\n"}, 5_000)
+
+    assert_sink_buffer(
+      pipeline,
+      :subs_sink,
+      %Membrane.Buffer{payload: "WEBVTT\n\n00:00.000 --> 00:01.000\nhello\n"},
+      5_000
+    )
 
     assert_end_of_stream(pipeline, :audio_sink)
     assert_end_of_stream(pipeline, :subs_sink)
