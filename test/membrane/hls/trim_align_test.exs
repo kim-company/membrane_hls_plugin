@@ -166,7 +166,14 @@ defmodule Membrane.HLS.TrimAlignTest do
       TrimAlign.handle_buffer(Pad.ref(:input, :subtitles), buffer(2_000), %{}, state)
 
     assert action_buffers_pts(actions, :video) == [Membrane.Time.milliseconds(1_900)]
-    assert action_buffers_pts(actions, :subtitles) == [Membrane.Time.milliseconds(2_000)]
+
+    # Text starts 100ms after the cut point, so a filler is prepended at the
+    # reference to keep all tracks aligned.
+    text_bufs = action_buffers(actions, :subtitles)
+    assert length(text_bufs) == 2
+    assert hd(text_bufs).pts == Membrane.Time.milliseconds(1_900)
+    assert hd(text_bufs).payload == ""
+    assert List.last(text_bufs).pts == Membrane.Time.milliseconds(2_000)
   end
 
   test "clips overlapping subtitle cue to alignment cut point" do
@@ -282,7 +289,118 @@ defmodule Membrane.HLS.TrimAlignTest do
       TrimAlign.handle_buffer(Pad.ref(:input, :subtitles), subtitle_after_cut, %{}, state)
 
     assert action_buffers_pts(actions, :video) == [Membrane.Time.milliseconds(1_900)]
-    assert action_buffers_pts(actions, :subtitles) == [Membrane.Time.milliseconds(2_000)]
+
+    # No metadata.to, subtitle starts after cut point → filler at reference.
+    text_bufs = action_buffers(actions, :subtitles)
+    assert length(text_bufs) == 2
+    assert hd(text_bufs).pts == Membrane.Time.milliseconds(1_900)
+    assert hd(text_bufs).payload == ""
+    assert List.last(text_bufs).pts == Membrane.Time.milliseconds(2_000)
+    assert List.last(text_bufs).payload == "after"
+  end
+
+  test "text pad with gap after cut point emits filler at reference to stay aligned" do
+    # Reproduces the production crash: cut point is at 4.0s (video keyframe),
+    # but the first subtitle cue arrives at 5.07s. Without a filler, the text
+    # track's first_forward_ts would be 5.07s — a 1.07s misalignment that
+    # cascades into HLS packager track_timing_mismatch_at_sync errors.
+    state = init_align(max_leading_trim: Membrane.Time.seconds(10), max_queued_buffers: 100)
+    state = add_pad(state, :video, :h264_keyframe)
+    state = add_pad(state, :audio, :any)
+    state = add_pad(state, :text, :any)
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(
+        Pad.ref(:input, :video),
+        %Membrane.H264{alignment: :au, nalu_in_metadata?: true},
+        %{},
+        state
+      )
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(Pad.ref(:input, :audio), %Membrane.AAC{}, %{}, state)
+
+    {[stream_format: _], state} =
+      TrimAlign.handle_stream_format(Pad.ref(:input, :text), %Membrane.Text{}, %{}, state)
+
+    # Video: non-keyframe at 0s, keyframe at 2s (the cut point), keyframe at 4s
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(0, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(2_000, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :video),
+        buffer(4_000, %{h264: %{key_frame?: true}}),
+        %{},
+        state
+      )
+
+    # Audio: frames at 2.014s and 4.02s (AAC frame boundary near cut point)
+    {[], state} =
+      TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(2_014), %{}, state)
+
+    {[], state} =
+      TrimAlign.handle_buffer(Pad.ref(:input, :audio), buffer(4_020), %{}, state)
+
+    # Text: first subtitle cue doesn't arrive until well after the cut point.
+    # This is the scenario from production — subtitle at T=0.03s, next at T=5.07s.
+    {[], state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :text),
+        %Membrane.Buffer{
+          payload: "early cue",
+          pts: Membrane.Time.milliseconds(30),
+          metadata: %{to: Membrane.Time.milliseconds(1_500)}
+        },
+        %{},
+        state
+      )
+
+    # This subtitle arrives 1.07s after the cut point. Alignment should
+    # still choose T=4.0s as the cut point (video keyframe), and text
+    # MUST start at T=4.0s too — with an empty filler if needed.
+    {actions, _state} =
+      TrimAlign.handle_buffer(
+        Pad.ref(:input, :text),
+        %Membrane.Buffer{
+          payload: "late cue",
+          pts: Membrane.Time.milliseconds(5_070),
+          metadata: %{to: Membrane.Time.milliseconds(8_000)}
+        },
+        %{},
+        state
+      )
+
+    # Video cuts at the keyframe
+    assert action_buffers_pts(actions, :video) == [Membrane.Time.milliseconds(4_000)]
+
+    # Audio cuts at the nearest AAC frame boundary (22ms drift is fine)
+    assert action_buffers_pts(actions, :audio) == [Membrane.Time.milliseconds(4_020)]
+
+    # Text MUST start at the cut point, not at 5.07s.
+    # The first buffer should be an empty filler at the reference,
+    # followed by the actual cue.
+    text_buffers = action_buffers(actions, :text)
+    assert length(text_buffers) == 2
+
+    [filler, actual_cue] = text_buffers
+    assert filler.pts == Membrane.Time.milliseconds(4_000)
+    assert filler.payload == ""
+    assert actual_cue.pts == Membrane.Time.milliseconds(5_070)
+    assert actual_cue.payload == "late cue"
   end
 
   test "raises for non parsed h264 format" do

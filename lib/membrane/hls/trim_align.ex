@@ -413,19 +413,28 @@ defmodule Membrane.HLS.TrimAlign do
         {trimmed, [first_forward | rest]} = Enum.split(buffers, index)
         first_forward_ts_raw = get_buffer_timestamp!(first_forward)
 
-        {first_forward, first_forward_ts} =
+        {forward_buffers, first_forward_ts} =
           case text_buffer_end_timestamp(first_forward) do
             end_ts
             when is_integer(end_ts) and first_forward_ts_raw < reference and end_ts > reference ->
-              {clip_text_buffer_start(first_forward, reference), reference}
+              # Cue overlaps the cut point — clip its start to the reference.
+              {[clip_text_buffer_start(first_forward, reference) | rest], reference}
+
+            _other when first_forward_ts_raw > reference ->
+              # Gap between the cut point and the first cue.  Prepend an empty
+              # filler so the track's first timestamp matches the reference
+              # exactly.  Without this, downstream packagers see a timing
+              # mismatch (e.g. text at 5.07s vs video at 4.0s).
+              filler = %Buffer{payload: "", pts: reference, dts: nil, metadata: %{}}
+              {[filler, first_forward | rest], reference}
 
             _other ->
-              {first_forward, first_forward_ts_raw}
+              {[first_forward | rest], first_forward_ts_raw}
           end
 
         %{
           trimmed_count: length(trimmed),
-          forward_buffers: [first_forward | rest],
+          forward_buffers: forward_buffers,
           first_forward_ts: first_forward_ts
         }
     end
