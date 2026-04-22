@@ -198,23 +198,27 @@ defmodule Membrane.HLS.SinkBinSlidingTest do
     |> Enum.each(fn media ->
       assert media.finished == false, "Sliding playlists should not be finished"
       assert_window_constraints(media, configured_max_segments)
-
-      case media.segments do
-        [] ->
-          :ok
-
-        [first | rest] ->
-          last_sequence = media.media_sequence_number + length(media.segments) - 1
-          assert first.absolute_sequence == media.media_sequence_number
-
-          Enum.reduce(rest, first.absolute_sequence, fn segment, prev ->
-            assert segment.absolute_sequence == prev + 1
-            segment.absolute_sequence
-          end)
-
-          assert media.media_sequence_number <= last_sequence
-      end
+      assert_sequential_segments(media)
     end)
+  end
+
+  defp assert_sequential_segments(media) do
+    case media.segments do
+      [] ->
+        :ok
+
+      [first | rest] ->
+        last_sequence = media.media_sequence_number + length(media.segments) - 1
+        assert first.absolute_sequence == media.media_sequence_number
+
+        media.segments
+        |> Enum.zip(rest)
+        |> Enum.each(fn {prev, curr} ->
+          assert curr.absolute_sequence == prev.absolute_sequence + 1
+        end)
+
+        assert media.media_sequence_number <= last_sequence
+    end
   end
 
   defp assert_window_constraints(media, configured_max_segments) do

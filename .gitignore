@@ -28,3 +28,4 @@ membrane_hls_plugin-*.tar
 /output
 validation_data.json
 .expert
+.dexter*

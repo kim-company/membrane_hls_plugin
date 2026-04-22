@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.WebVTT.Aggregator do
+  @moduledoc false
+
   use Membrane.Filter
 
   alias Membrane.{Buffer, Time}
@@ -47,7 +49,7 @@ defmodule Membrane.HLS.WebVTT.Aggregator do
   end
 
   @impl true
-  def handle_buffer(:input, buffer, ctx, state = %{segment: nil}) do
+  def handle_buffer(:input, buffer, ctx, %{segment: nil} = state) do
     # If the segment is nil, it means this is the first buffer
     # and the option resume was set.
     from = buffer.pts
@@ -167,7 +169,7 @@ defmodule Membrane.HLS.WebVTT.Aggregator do
     {buffers, state}
   end
 
-  defp put_and_get(state = %{omit_repetition: true}, buffer, acc) do
+  defp put_and_get(%{omit_repetition: true} = state, buffer, acc) do
     segment = state.segment
     from = buffer.pts
     to = buffer.metadata.to

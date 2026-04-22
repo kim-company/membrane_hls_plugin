@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.AAC.Aggregator do
+  @moduledoc false
+
   use Membrane.Filter
 
   def_input_pad(:input,
@@ -24,7 +26,7 @@ defmodule Membrane.HLS.AAC.Aggregator do
   end
 
   @impl true
-  def handle_end_of_stream(:input, _ctx, state = %{acc: []}) do
+  def handle_end_of_stream(:input, _ctx, %{acc: []} = state) do
     {[end_of_stream: :output], state}
   end
 

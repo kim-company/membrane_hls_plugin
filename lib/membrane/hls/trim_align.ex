@@ -157,22 +157,27 @@ defmodule Membrane.HLS.TrimAlign do
          Enum.any?(state.pads, fn {_pad, data} -> is_nil(data.cut_candidate) end) do
       {[], state}
     else
-      case resolve_alignment_reference(state.pads) do
-        {:ok, reference} ->
-          case build_alignment_actions(state, reference) do
-            {:ok, actions, pads, aligned_reference} ->
-              {actions, %{state | alignment_reference: aligned_reference, pads: pads}}
+      apply_alignment_reference(state)
+    end
+  end
 
-            :not_ready ->
-              {[], state}
+  defp apply_alignment_reference(state) do
+    case resolve_alignment_reference(state.pads) do
+      {:ok, reference} -> apply_alignment(state, reference)
+      :not_ready -> {[], state}
+    end
+  end
 
-            {:error, reason} ->
-              raise RuntimeError, reason
-          end
+  defp apply_alignment(state, reference) do
+    case build_alignment_actions(state, reference) do
+      {:ok, actions, pads, aligned_reference} ->
+        {actions, %{state | alignment_reference: aligned_reference, pads: pads}}
 
-        :not_ready ->
-          {[], state}
-      end
+      :not_ready ->
+        {[], state}
+
+      {:error, reason} ->
+        raise RuntimeError, reason
     end
   end
 
@@ -243,15 +248,19 @@ defmodule Membrane.HLS.TrimAlign do
 
   defp next_h264_cut_points(pads, reference) do
     Enum.reduce_while(pads, {:ok, []}, fn {_pad, pad_state}, {:ok, acc} ->
-      if h264_pad?(pad_state) do
-        case next_h264_cut_point(pad_state, reference) do
-          :not_ready -> {:halt, :not_ready}
-          ts -> {:cont, {:ok, [ts | acc]}}
-        end
-      else
-        {:cont, {:ok, acc}}
-      end
+      accumulate_h264_cut_point(pad_state, reference, acc)
     end)
+  end
+
+  defp accumulate_h264_cut_point(pad_state, reference, acc) do
+    if h264_pad?(pad_state) do
+      case next_h264_cut_point(pad_state, reference) do
+        :not_ready -> {:halt, :not_ready}
+        ts -> {:cont, {:ok, [ts | acc]}}
+      end
+    else
+      {:cont, {:ok, acc}}
+    end
   end
 
   defp next_h264_cut_point(pad_state, reference) do
@@ -288,28 +297,31 @@ defmodule Membrane.HLS.TrimAlign do
     with {:ok, selection} <- select_buffers(state.pads, reference),
          :ok <- validate_trim_limits(state.pads, selection, state.max_leading_trim) do
       log_alignment_selection(state.pads, selection, reference)
-
-      actions =
-        selection
-        |> Enum.reduce([], fn {pad, %{forward_buffers: forward_buffers}}, acc ->
-          if forward_buffers == [] do
-            acc
-          else
-            [{:buffer, {output_pad(pad), forward_buffers}} | acc]
-          end
-        end)
-        |> Enum.reverse()
-
-      pads =
-        Enum.reduce(state.pads, %{}, fn {pad, pad_state}, acc ->
-          Map.put(acc, pad, %{pad_state | queue: :queue.new(), started?: true})
-        end)
-
+      actions = build_buffer_actions(selection)
+      pads = reset_pad_queues(state.pads)
       {:ok, actions, pads, reference}
     else
       :not_ready -> :not_ready
       {:error, _reason} = error -> error
     end
+  end
+
+  defp build_buffer_actions(selection) do
+    selection
+    |> Enum.reduce([], fn {pad, %{forward_buffers: forward_buffers}}, acc ->
+      if forward_buffers == [] do
+        acc
+      else
+        [{:buffer, {output_pad(pad), forward_buffers}} | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp reset_pad_queues(pads) do
+    Enum.reduce(pads, %{}, fn {pad, pad_state}, acc ->
+      Map.put(acc, pad, %{pad_state | queue: :queue.new(), started?: true})
+    end)
   end
 
   defp log_alignment_selection(pads, selection, reference) do
@@ -395,14 +407,7 @@ defmodule Membrane.HLS.TrimAlign do
     index =
       Enum.find_index(buffers, fn buffer ->
         buffer_ts = get_buffer_timestamp!(buffer)
-
-        cond do
-          buffer_ts >= reference ->
-            true
-
-          true ->
-            text_buffer_overlaps_reference?(buffer, reference)
-        end
+        buffer_ts >= reference or text_buffer_overlaps_reference?(buffer, reference)
       end)
 
     case index do
@@ -414,29 +419,33 @@ defmodule Membrane.HLS.TrimAlign do
         first_forward_ts_raw = get_buffer_timestamp!(first_forward)
 
         {forward_buffers, first_forward_ts} =
-          case text_buffer_end_timestamp(first_forward) do
-            end_ts
-            when is_integer(end_ts) and first_forward_ts_raw < reference and end_ts > reference ->
-              # Cue overlaps the cut point — clip its start to the reference.
-              {[clip_text_buffer_start(first_forward, reference) | rest], reference}
-
-            _other when first_forward_ts_raw > reference ->
-              # Gap between the cut point and the first cue.  Prepend an empty
-              # filler so the track's first timestamp matches the reference
-              # exactly.  Without this, downstream packagers see a timing
-              # mismatch (e.g. text at 5.07s vs video at 4.0s).
-              filler = %Buffer{payload: "", pts: reference, dts: nil, metadata: %{}}
-              {[filler, first_forward | rest], reference}
-
-            _other ->
-              {[first_forward | rest], first_forward_ts_raw}
-          end
+          adjust_text_forward(first_forward, rest, first_forward_ts_raw, reference)
 
         %{
           trimmed_count: length(trimmed),
           forward_buffers: forward_buffers,
           first_forward_ts: first_forward_ts
         }
+    end
+  end
+
+  defp adjust_text_forward(first_forward, rest, first_forward_ts_raw, reference) do
+    case text_buffer_end_timestamp(first_forward) do
+      end_ts
+      when is_integer(end_ts) and first_forward_ts_raw < reference and end_ts > reference ->
+        # Cue overlaps the cut point — clip its start to the reference.
+        {[clip_text_buffer_start(first_forward, reference) | rest], reference}
+
+      _other when first_forward_ts_raw > reference ->
+        # Gap between the cut point and the first cue.  Prepend an empty
+        # filler so the track's first timestamp matches the reference
+        # exactly.  Without this, downstream packagers see a timing
+        # mismatch (e.g. text at 5.07s vs video at 4.0s).
+        filler = %Buffer{payload: "", pts: reference, dts: nil, metadata: %{}}
+        {[filler, first_forward | rest], reference}
+
+      _other ->
+        {[first_forward | rest], first_forward_ts_raw}
     end
   end
 

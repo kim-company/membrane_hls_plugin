@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.CMAFSink do
+  @moduledoc false
+
   use Membrane.Sink
 
   def_input_pad(

@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.StreamFormatAdapter do
+  @moduledoc false
+
   use Membrane.Filter
 
   def_input_pad(:input,

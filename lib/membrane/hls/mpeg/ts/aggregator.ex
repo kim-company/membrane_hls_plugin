@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.MPEG.TS.Aggregator do
+  @moduledoc false
+
   use Membrane.Filter
 
   def_input_pad(:input,
@@ -43,7 +45,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
   end
 
   @impl true
-  def handle_end_of_stream(:input, _ctx, state = %{acc: []}) do
+  def handle_end_of_stream(:input, _ctx, %{acc: []} = state) do
     {[end_of_stream: :output], state}
   end
 
@@ -54,7 +56,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
 
   def handle_buffer(
         :input,
-        buffer = %{metadata: %{pid: 0}},
+        %{metadata: %{pid: 0}} = buffer,
         _ctx,
         state
       ) do
@@ -63,7 +65,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
 
   def handle_buffer(
         :input,
-        buffer = %{metadata: %{pid: 0x1000}},
+        %{metadata: %{pid: 0x1000}} = buffer,
         _ctx,
         state
       ) do
@@ -78,9 +80,9 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
 
   def handle_buffer(
         :input,
-        buffer = %{metadata: %{pusi: true, rai: true}},
+        %{metadata: %{pusi: true, rai: true}} = buffer,
         _ctx,
-        state = %{ts: nil}
+        %{ts: nil} = state
       ) do
     {[], init_segment(state, buffer)}
   end
@@ -89,12 +91,12 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
         :input,
         %{metadata: %{pusi: true}},
         _ctx,
-        state = %{ts: nil}
+        %{ts: nil} = state
       ) do
     {[], state}
   end
 
-  def handle_buffer(:input, buffer = %{metadata: %{rai: true}}, _ctx, state) do
+  def handle_buffer(:input, %{metadata: %{rai: true}} = buffer, _ctx, state) do
     buffer_ts = Membrane.Buffer.get_dts_or_pts(buffer)
     duration = state.accumulated_offset + (buffer_ts - state.ts)
 
@@ -108,7 +110,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
     end
   end
 
-  def handle_buffer(:input, buffer, _ctx, state = %{acc: []}) do
+  def handle_buffer(:input, buffer, _ctx, %{acc: []} = state) do
     Membrane.Logger.warning(
       "Received buffer before PUSI indicator -- dropping (pts: #{buffer.pts})"
     )
@@ -178,10 +180,7 @@ defmodule Membrane.HLS.MPEG.TS.Aggregator do
     buffers = Enum.reverse(state.acc)
     units = Enum.flat_map(buffers, fn x -> Map.get(x.metadata, :units, []) end)
 
-    payload =
-      buffers
-      |> Enum.map(fn x -> x.payload end)
-      |> Enum.join(<<>>)
+    payload = Enum.map_join(buffers, <<>>, fn x -> x.payload end)
 
     buffer = %Membrane.Buffer{
       payload: payload,

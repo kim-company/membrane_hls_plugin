@@ -269,7 +269,7 @@ defmodule Membrane.HLS.SinkBin do
   end
 
   @impl true
-  def handle_element_start_of_stream(child, _pad, _ctx, state = %{mode: mode}) do
+  def handle_element_start_of_stream(child, _pad, _ctx, %{mode: mode} = state) do
     if live_mode?(mode) and is_nil(mode_sync_state(mode)) do
       Membrane.Logger.debug("Initializing live state: triggering child: #{inspect(child)}")
       {[], live_init_state(state)}
@@ -544,23 +544,29 @@ defmodule Membrane.HLS.SinkBin do
     max_segments = mode_max_segments(opts.playlist_mode)
 
     if opts.resume? do
-      case resume_packager(opts, storage, max_segments) do
-        {:ok, packager} ->
-          {packager, [{:packager_updated, :resumed, packager}]}
-
-        {:error, error} ->
-          case opts.resume_on_error do
-            :raise ->
-              raise "Failed to resume packager: #{inspect(error)}"
-
-            :start_new ->
-              {packager, events} = new_packager(opts, max_segments)
-              {packager, [{:packager_updated, :resume_failed, error} | events]}
-          end
-      end
+      init_packager_with_resume(opts, storage, max_segments)
     else
       new_packager(opts, max_segments)
     end
+  end
+
+  defp init_packager_with_resume(opts, storage, max_segments) do
+    case resume_packager(opts, storage, max_segments) do
+      {:ok, packager} ->
+        {packager, [{:packager_updated, :resumed, packager}]}
+
+      {:error, error} ->
+        handle_resume_error(opts, max_segments, error)
+    end
+  end
+
+  defp handle_resume_error(%{resume_on_error: :raise}, _max_segments, error) do
+    raise "Failed to resume packager: #{inspect(error)}"
+  end
+
+  defp handle_resume_error(opts, max_segments, error) do
+    {packager, events} = new_packager(opts, max_segments)
+    {packager, [{:packager_updated, :resume_failed, error} | events]}
   end
 
   defp new_packager(opts, max_segments) do
@@ -608,37 +614,45 @@ defmodule Membrane.HLS.SinkBin do
     streams = master.streams ++ master.alternative_renditions
 
     Enum.reduce_while(streams, {:ok, %{}}, fn stream, {:ok, acc} ->
-      case Map.get(stream, :uri) do
-        nil ->
-          {:cont, {:ok, acc}}
-
-        uri ->
-          key = to_string(uri)
-
-          if Map.has_key?(acc, key) do
-            {:cont, {:ok, acc}}
-          else
-            absolute_uri = HLS.Playlist.build_absolute_uri(master.uri, uri)
-
-            case HLS.Storage.get(storage, absolute_uri) do
-              {:ok, payload} ->
-                case unmarshal_media(payload, uri) do
-                  {:ok, media} -> {:cont, {:ok, Map.put(acc, key, media)}}
-                  {:error, error} -> {:halt, {:error, error}}
-                end
-
-              {:error, :not_found} ->
-                {:cont, {:ok, acc}}
-
-              {:error, reason} ->
-                {:halt, {:error, reason}}
-            end
-          end
-      end
+      fetch_stream_media(stream, acc, master.uri, storage)
     end)
     |> case do
       {:ok, medias} -> {:ok, Map.values(medias)}
       {:error, _} = error -> error
+    end
+  end
+
+  defp fetch_stream_media(stream, acc, master_uri, storage) do
+    case Map.get(stream, :uri) do
+      nil -> {:cont, {:ok, acc}}
+      uri -> fetch_uri_media(uri, acc, master_uri, storage)
+    end
+  end
+
+  defp fetch_uri_media(uri, acc, master_uri, storage) do
+    key = to_string(uri)
+
+    if Map.has_key?(acc, key) do
+      {:cont, {:ok, acc}}
+    else
+      absolute_uri = HLS.Playlist.build_absolute_uri(master_uri, uri)
+      load_and_accumulate_media(absolute_uri, uri, key, acc, storage)
+    end
+  end
+
+  defp load_and_accumulate_media(absolute_uri, uri, key, acc, storage) do
+    case HLS.Storage.get(storage, absolute_uri) do
+      {:ok, payload} ->
+        case unmarshal_media(payload, uri) do
+          {:ok, media} -> {:cont, {:ok, Map.put(acc, key, media)}}
+          {:error, error} -> {:halt, {:error, error}}
+        end
+
+      {:error, :not_found} ->
+        {:cont, {:ok, acc}}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
     end
   end
 
@@ -736,9 +750,8 @@ defmodule Membrane.HLS.SinkBin do
     target_segment_duration_ms =
       Membrane.Time.as_milliseconds(state.opts.target_segment_duration, :round)
 
-    # TODO(optimization): we have a double safety_delay situation: packager
-    # waits three segments to write the master playlist down, and the timer
-    # there waits three iterations before ticking.
+    # Double safety_delay: packager waits three segments to write the master playlist,
+    # and the timer here also waits three iterations before ticking.
     Membrane.Time.as_milliseconds(safety_delay, :round) + target_segment_duration_ms * 3
   end
 
@@ -877,64 +890,57 @@ defmodule Membrane.HLS.SinkBin do
     Enum.reduce(actions, state, &execute_action/2)
   end
 
-  defp execute_action(action, state) do
-    case action do
-      %Packager.Action.WritePlaylist{uri: uri, content: content} ->
-        case HLS.Storage.put(state.storage, uri, content) do
-          :ok ->
-            state
+  defp execute_action(%Packager.Action.WritePlaylist{uri: uri, content: content}, state) do
+    case HLS.Storage.put(state.storage, uri, content) do
+      :ok ->
+        state
 
-          {:error, reason} ->
-            Membrane.Logger.error(
-              "Failed to write playlist #{to_string(uri)}: #{inspect(reason)}"
-            )
-
-            state
-        end
-
-      %Packager.Action.DeleteSegment{uri: uri} ->
-        case HLS.Storage.delete(state.storage, uri) do
-          :ok ->
-            state
-
-          {:error, reason} ->
-            Membrane.Logger.error(
-              "Failed to delete segment #{to_string(uri)}: #{inspect(reason)}"
-            )
-
-            state
-        end
-
-      %Packager.Action.DeleteInitSection{uri: uri} ->
-        case HLS.Storage.delete(state.storage, uri) do
-          :ok ->
-            state
-
-          {:error, reason} ->
-            Membrane.Logger.error(
-              "Failed to delete init section #{to_string(uri)}: #{inspect(reason)}"
-            )
-
-            state
-        end
-
-      %Packager.Action.DeletePlaylist{uri: uri} ->
-        case HLS.Storage.delete(state.storage, uri) do
-          :ok ->
-            state
-
-          {:error, reason} ->
-            Membrane.Logger.error(
-              "Failed to delete playlist #{to_string(uri)}: #{inspect(reason)}"
-            )
-
-            state
-        end
-
-      _ ->
-        Membrane.Logger.warning("Unhandled packager action: #{inspect(action)}")
+      {:error, reason} ->
+        Membrane.Logger.error("Failed to write playlist #{to_string(uri)}: #{inspect(reason)}")
         state
     end
+  end
+
+  defp execute_action(%Packager.Action.DeleteSegment{uri: uri}, state) do
+    case HLS.Storage.delete(state.storage, uri) do
+      :ok ->
+        state
+
+      {:error, reason} ->
+        Membrane.Logger.error("Failed to delete segment #{to_string(uri)}: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp execute_action(%Packager.Action.DeleteInitSection{uri: uri}, state) do
+    case HLS.Storage.delete(state.storage, uri) do
+      :ok ->
+        state
+
+      {:error, reason} ->
+        Membrane.Logger.error(
+          "Failed to delete init section #{to_string(uri)}: #{inspect(reason)}"
+        )
+
+        state
+    end
+  end
+
+  defp execute_action(%Packager.Action.DeletePlaylist{uri: uri}, state) do
+    case HLS.Storage.delete(state.storage, uri) do
+      :ok ->
+        state
+
+      {:error, reason} ->
+        Membrane.Logger.error("Failed to delete playlist #{to_string(uri)}: #{inspect(reason)}")
+
+        state
+    end
+  end
+
+  defp execute_action(action, state) do
+    Membrane.Logger.warning("Unhandled packager action: #{inspect(action)}")
+    state
   end
 
   defp maybe_sync_on_segment(%{mode: {:vod, _state}, expected_tracks: expected} = state) do

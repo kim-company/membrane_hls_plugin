@@ -12,12 +12,25 @@ defmodule Membrane.HLS.SourceBinTest do
     use Membrane.Pipeline
 
     @impl true
-    def handle_init(_ctx, opts = %{storage: storage, master_playlist_uri: uri}) do
+    def handle_init(_ctx, %{storage: storage, master_playlist_uri: uri} = opts) do
       structure = [
         child(:source, %SourceBin{storage: storage, master_playlist_uri: uri})
       ]
 
       {[spec: structure], opts}
+    end
+
+    defp build_alt_spec(alt) do
+      sink_name =
+        case alt.type do
+          :audio -> :audio_sink
+          :subtitles -> :subs_sink
+          other -> {:alt_sink, other}
+        end
+
+      get_child(:source)
+      |> via_out(Pad.ref(:output, {:rendition, alt}))
+      |> child(sink_name, Membrane.Testing.Sink)
     end
 
     def handle_child_notification({:hls_master_playlist, master}, :source, _ctx, state) do
@@ -39,21 +52,7 @@ defmodule Membrane.HLS.SourceBinTest do
 
           structure =
             if Map.get(state, :select_alternatives, false) do
-              alt_specs =
-                master.alternative_renditions
-                |> Enum.map(fn alt ->
-                  sink_name =
-                    case alt.type do
-                      :audio -> :audio_sink
-                      :subtitles -> :subs_sink
-                      other -> {:alt_sink, other}
-                    end
-
-                  get_child(:source)
-                  |> via_out(Pad.ref(:output, {:rendition, alt}))
-                  |> child(sink_name, Membrane.Testing.Sink)
-                end)
-
+              alt_specs = Enum.map(master.alternative_renditions, &build_alt_spec/1)
               base ++ alt_specs
             else
               base

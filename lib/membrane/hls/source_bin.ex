@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.SourceBin do
+  @moduledoc false
+
   use Membrane.Bin
 
   alias HLS.Playlist
@@ -45,7 +47,7 @@ defmodule Membrane.HLS.SourceBin do
   end
 
   @impl true
-  def handle_pad_added(pad = {Membrane.Pad, :output, {:rendition, rendition}}, _ctx, state) do
+  def handle_pad_added({Membrane.Pad, :output, {:rendition, rendition}} = pad, _ctx, state) do
     media_uri = Playlist.build_absolute_uri(state.master_playlist_uri, extract_uri(rendition))
     stream_format = build_stream_format(rendition)
     child_name = {:source, pad}
@@ -80,7 +82,7 @@ defmodule Membrane.HLS.SourceBin do
   def handle_info(
         :check_master_playlist,
         _ctx,
-        state = %{storage: storage, master_playlist_uri: uri}
+        %{storage: storage, master_playlist_uri: uri} = state
       ) do
     case Storage.get(storage, uri) do
       {:ok, data} ->

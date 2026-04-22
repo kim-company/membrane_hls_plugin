@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.NALU.DurationEstimator do
+  @moduledoc false
+
   use Membrane.Filter
 
   def_input_pad(:input, accepted_format: _any)

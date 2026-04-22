@@ -1,4 +1,6 @@
 defmodule Membrane.HLS.Filler.Text do
+  @moduledoc false
+
   use Membrane.Filter
 
   def_input_pad(:input, accepted_format: Membrane.Text)
@@ -16,7 +18,7 @@ defmodule Membrane.HLS.Filler.Text do
   end
 
   @impl true
-  def handle_end_of_stream(:input, _ctx, state = %{time_reference: nil}) do
+  def handle_end_of_stream(:input, _ctx, %{time_reference: nil} = state) do
     # We need parent notification first.
     {[], state}
   end
@@ -26,12 +28,12 @@ defmodule Membrane.HLS.Filler.Text do
   end
 
   @impl true
-  def handle_buffer(:input, buffer, _ctx, state = %{time_reference: nil}) do
+  def handle_buffer(:input, buffer, _ctx, %{time_reference: nil} = state) do
     state = update_in(state, [:queue], fn q -> :queue.in(buffer, q) end)
     {[], state}
   end
 
-  def handle_buffer(:input, buffer, ctx, state = %{time_first_buffer: nil}) do
+  def handle_buffer(:input, buffer, ctx, %{time_first_buffer: nil} = state) do
     state =
       state
       |> update_in([:queue], fn q -> :queue.in(buffer, q) end)
@@ -45,7 +47,7 @@ defmodule Membrane.HLS.Filler.Text do
   end
 
   @impl true
-  def handle_parent_notification({:time_reference, t}, ctx, state = %{time_reference: nil}) do
+  def handle_parent_notification({:time_reference, t}, ctx, %{time_reference: nil} = state) do
     state = put_in(state, [:time_reference], t)
 
     cond do

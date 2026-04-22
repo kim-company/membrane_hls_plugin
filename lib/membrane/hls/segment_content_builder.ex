@@ -17,6 +17,6 @@ defprotocol Membrane.HLS.SegmentContentBuilder do
   @spec drop_buffers_in_segment(t(), Segment.t(), boolean()) :: {t(), [Buffer.t()]}
   def drop_buffers_in_segment(impl, segment, disable_pending)
 
-  @spec is_empty?(t()) :: boolean()
-  def is_empty?(impl)
+  @spec empty?(t()) :: boolean()
+  def empty?(impl)
 end

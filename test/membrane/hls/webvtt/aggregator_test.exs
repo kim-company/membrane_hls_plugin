@@ -127,11 +127,7 @@ defmodule Membrane.HLS.WebVTT.AggregatorTest do
               buffer.payload
               |> Subtitle.WebVTT.unmarshal!()
               |> get_in([Access.key!(:cues)])
-              |> Enum.map(fn x ->
-                x
-                |> update_in([Access.key!(:from)], fn x -> trunc(x / 1000) end)
-                |> update_in([Access.key!(:to)], fn x -> trunc(x / 1000) end)
-              end)
+              |> Enum.map(&normalize_cue_timestamps/1)
 
             x = %{
               from: Membrane.Time.as_seconds(buffer.pts, :round),
@@ -150,5 +146,11 @@ defmodule Membrane.HLS.WebVTT.AggregatorTest do
       end
     )
     |> Enum.into([])
+  end
+
+  defp normalize_cue_timestamps(cue) do
+    cue
+    |> update_in([Access.key!(:from)], fn x -> trunc(x / 1000) end)
+    |> update_in([Access.key!(:to)], fn x -> trunc(x / 1000) end)
   end
 end

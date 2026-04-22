@@ -298,7 +298,7 @@ defmodule Membrane.HLS.SinkBinEventTest do
 
     Enum.each(media_playlists, fn media ->
       segments = Enum.filter(media.segments, & &1.discontinuity)
-      assert length(segments) >= 1
+      assert segments != []
     end)
   end
 

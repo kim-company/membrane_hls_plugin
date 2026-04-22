@@ -1,4 +1,6 @@
 defmodule Membrane.HLS do
+  @moduledoc false
+
   require Logger
 
   def maybe_warn_deprecated_stream_fields(_track_id, stream)

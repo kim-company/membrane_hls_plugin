@@ -1,4 +1,6 @@
 defmodule Support.Builder do
+  @moduledoc false
+
   import Membrane.ChildrenSpec
   import ExUnit.Assertions
 
@@ -372,25 +374,29 @@ defmodule Support.Builder do
 
     (master_playlist.streams ++ master_playlist.alternative_renditions)
     |> Enum.reduce([], fn stream, acc ->
-      case Map.get(stream, :uri) do
-        nil ->
-          acc
-
-        uri ->
-          uri_path = if is_struct(uri, URI), do: uri.path, else: uri
-          playlist_path = Path.join(manifest_dir, uri_path)
-          playlist_content = File.read!(playlist_path)
-
-          media_playlist =
-            HLS.Playlist.unmarshal(
-              playlist_content,
-              %HLS.Playlist.Media{uri: URI.new!("file://#{playlist_path}")}
-            )
-
-          [media_playlist | acc]
-      end
+      load_stream_playlist(stream, manifest_dir, acc)
     end)
     |> Enum.reverse()
+  end
+
+  defp load_stream_playlist(stream, manifest_dir, acc) do
+    case Map.get(stream, :uri) do
+      nil ->
+        acc
+
+      uri ->
+        uri_path = if is_struct(uri, URI), do: uri.path, else: uri
+        playlist_path = Path.join(manifest_dir, uri_path)
+        playlist_content = File.read!(playlist_path)
+
+        media_playlist =
+          HLS.Playlist.unmarshal(
+            playlist_content,
+            %HLS.Playlist.Media{uri: URI.new!("file://#{playlist_path}")}
+          )
+
+        [media_playlist | acc]
+    end
   end
 
   def assert_program_date_time_alignment(manifest_uri, tolerance_ms) do
@@ -471,28 +477,23 @@ defmodule Support.Builder do
     assert media_playlist.target_segment_duration > 0,
            "Media playlist should have a target segment duration"
 
-    if Enum.empty?(media_playlist.segments) do
-      :ok
-    else
-      assert length(media_playlist.segments) > 0,
-             "Media playlist should contain at least one segment"
+    Enum.each(media_playlist.segments, &validate_segment(&1, playlist_dir))
+  end
 
-      Enum.each(media_playlist.segments, fn segment ->
-        segment_uri_path = if is_struct(segment.uri, URI), do: segment.uri.path, else: segment.uri
+  defp validate_segment(segment, playlist_dir) do
+    segment_uri_path = if is_struct(segment.uri, URI), do: segment.uri.path, else: segment.uri
 
-        segment_path =
-          if String.starts_with?(segment_uri_path, "/") do
-            segment_uri_path
-          else
-            Path.join(playlist_dir, segment_uri_path)
-          end
+    segment_path =
+      if String.starts_with?(segment_uri_path, "/") do
+        segment_uri_path
+      else
+        Path.join(playlist_dir, segment_uri_path)
+      end
 
-        assert File.exists?(segment_path),
-               "Segment file should exist: #{segment_path}"
+    assert File.exists?(segment_path),
+           "Segment file should exist: #{segment_path}"
 
-        assert File.stat!(segment_path).size > 0,
-               "Segment file should not be empty: #{segment_path}"
-      end)
-    end
+    assert File.stat!(segment_path).size > 0,
+           "Segment file should not be empty: #{segment_path}"
   end
 end
