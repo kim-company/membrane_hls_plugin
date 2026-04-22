@@ -60,6 +60,29 @@ defmodule Membrane.HLS.SinkBinInitTest do
   end
 
   @tag :tmp_dir
+  test "resumes a finalized VOD playlist as live when resume_as_live is true", %{tmp_dir: tmp_dir} do
+    {manifest_uri, storage} = build_storage(tmp_dir)
+    media_uri = URI.new!("stream_video.m3u8")
+
+    write_vod_playlists(storage, manifest_uri, media_uri)
+
+    {pipeline, _manifest_uri} =
+      start_sink(tmp_dir,
+        resume?: true,
+        resume_as_live: true,
+        resume_on_error: :raise,
+        storage: storage
+      )
+
+    assert_pipeline_notified(pipeline, :sink, {:packager_updated, :resumed, packager})
+    track = packager.tracks["video"]
+    assert track.media_playlist.finished == false
+    assert track.media_playlist.type == :event
+
+    Membrane.Testing.Pipeline.terminate(pipeline)
+  end
+
+  @tag :tmp_dir
   test "ignores existing CMAF playlists with init section when starting new", %{tmp_dir: tmp_dir} do
     {manifest_uri, storage} = build_storage(tmp_dir)
     media_uri = URI.new!("stream_video.m3u8")
@@ -152,6 +175,28 @@ defmodule Membrane.HLS.SinkBinInitTest do
       target_segment_duration: 6,
       media_sequence_number: 0,
       type: :event,
+      segments: [segment]
+    }
+
+    :ok = HLS.Storage.put(storage, media_uri, HLS.Playlist.marshal(media))
+  end
+
+  defp write_vod_playlists(storage, manifest_uri, media_uri) do
+    write_cmaf_master(storage, manifest_uri, media_uri)
+
+    segment = %Segment{
+      uri: URI.new!("segment_00001.m4s"),
+      duration: 6.0,
+      init_section: %{uri: "init.mp4"}
+    }
+
+    media = %Media{
+      uri: media_uri,
+      version: 7,
+      target_segment_duration: 6,
+      media_sequence_number: 0,
+      type: :vod,
+      finished: true,
       segments: [segment]
     }
 

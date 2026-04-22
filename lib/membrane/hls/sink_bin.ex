@@ -72,6 +72,19 @@ defmodule Membrane.HLS.SinkBin do
       Policy for broken or missing initial playlists when resuming.
       """
     ],
+    resume_as_live: [
+      spec: boolean(),
+      default: false,
+      description: """
+      When true, all media playlists loaded during resume have their `finished` flag
+      reset to `false` and their `type` cleared before being handed to the packager.
+      This allows resuming against a previously-finalized VOD playlist as if it were
+      still a live event, preventing the packager from staying in VOD mode and silently
+      dropping new segments.
+
+      Only meaningful when `resume?` is also true.
+      """
+    ],
     flush_on_end: [
       spec: boolean(),
       default: true,
@@ -567,13 +580,19 @@ defmodule Membrane.HLS.SinkBin do
          {:ok, packager} <-
            Packager.resume(
              master_playlist: master,
-             media_playlists: media_playlists,
+             media_playlists: reset_playlists_for_live(media_playlists, opts.resume_as_live),
              max_segments: max_segments
            ) do
       {:ok, packager}
     else
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp reset_playlists_for_live(media_playlists, false), do: media_playlists
+
+  defp reset_playlists_for_live(media_playlists, true) do
+    Enum.map(media_playlists, &%{&1 | type: nil, finished: false})
   end
 
   defp unmarshal_master(payload, manifest_uri) do
