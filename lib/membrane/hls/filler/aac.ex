@@ -1,8 +1,9 @@
 defmodule Membrane.HLS.Filler.AAC do
   use Membrane.Filter
 
-  @silent_frame <<255, 241, 76, 128, 3, 223, 252, 222, 2, 0, 76, 97, 118, 99, 53, 56, 46, 57, 49,
-                  46, 49, 48, 48, 0, 66, 32, 8, 193, 24, 56>>
+  @silent_frame_adts <<255, 241, 76, 128, 3, 223, 252, 222, 2, 0, 76, 97, 118, 99, 53, 56, 46, 57,
+                       49, 46, 49, 48, 48, 0, 66, 32, 8, 193, 24, 56>>
+  @silent_frame_raw binary_part(@silent_frame_adts, 7, byte_size(@silent_frame_adts) - 7)
 
   def_input_pad(:input,
     accepted_format: %Membrane.AAC{profile: :LC, channels: 2, sample_rate: 48_000}
@@ -115,7 +116,7 @@ defmodule Membrane.HLS.Filler.AAC do
         else
           buffer = %Membrane.Buffer{
             pts: to,
-            payload: @silent_frame
+            payload: silent_frame(stream_format)
           }
 
           {[buffer], {from, to - frame_duration}}
@@ -125,4 +126,7 @@ defmodule Membrane.HLS.Filler.AAC do
     )
     |> Enum.reverse()
   end
+
+  defp silent_frame(%Membrane.AAC{encapsulation: :none}), do: @silent_frame_raw
+  defp silent_frame(%Membrane.AAC{encapsulation: :ADTS}), do: @silent_frame_adts
 end
