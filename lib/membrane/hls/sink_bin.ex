@@ -18,6 +18,12 @@ defmodule Membrane.HLS.SinkBin do
   - `{:event, safety_delay}` syncs on a target-duration cadence.
   - `{:sliding, max_segments, safety_delay}` syncs on cadence and keeps a rolling window.
 
+  ## Subtitle text layout
+  - Unmarked text buffers use automatic WebVTT cue formatting.
+  - A text buffer with `metadata.text_layout: :verbatim` is serialized with its payload unchanged.
+    The caller is responsible for providing valid WebVTT cue text.
+  - The marker affects text layout only; timing and segment-boundary policies still apply.
+
   ## Policy and error handling
   - All outputs are RFC-compliant.
   - `:vod` is strict: any packager error fails fast.

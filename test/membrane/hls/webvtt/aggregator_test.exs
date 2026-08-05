@@ -86,6 +86,17 @@ defmodule Membrane.HLS.WebVTT.AggregatorTest do
            ]
   end
 
+  test "verbatim cue layout is preserved in the generated WebVTT segment" do
+    text = "  Authored first line  \nAuthored second line  "
+
+    [segment] =
+      segment_buffers([
+        %{from: 0, to: 4, payload: text, metadata: %{text_layout: :verbatim}}
+      ])
+
+    assert segment.payload =~ "\n#{text}\n\n"
+  end
+
   defp generate_cues(cues) do
     cues
     |> Enum.with_index()
@@ -95,12 +106,33 @@ defmodule Membrane.HLS.WebVTT.AggregatorTest do
   end
 
   defp segment_cues(cues, omit_repetition \\ false) do
+    cues
+    |> segment_buffers(omit_repetition)
+    |> Enum.map(fn buffer ->
+      cues =
+        buffer.payload
+        |> Subtitle.WebVTT.unmarshal!()
+        |> get_in([Access.key!(:cues)])
+        |> Enum.map(&normalize_cue_timestamps/1)
+
+      %{
+        from: Membrane.Time.as_seconds(buffer.pts, :round),
+        to: Membrane.Time.as_seconds(buffer.metadata.to, :round),
+        cues: cues
+      }
+    end)
+  end
+
+  defp segment_buffers(cues, omit_repetition \\ false) do
     buffers =
-      Enum.map(cues, fn %{from: from, to: to, payload: payload} ->
+      Enum.map(cues, fn %{from: from, to: to, payload: payload} = cue ->
         %Buffer{
           pts: Membrane.Time.seconds(from),
           payload: payload,
-          metadata: %{to: Membrane.Time.seconds(to)}
+          metadata:
+            cue
+            |> Map.get(:metadata, %{})
+            |> Map.put(:to, Membrane.Time.seconds(to))
         }
       end)
 
@@ -123,19 +155,7 @@ defmodule Membrane.HLS.WebVTT.AggregatorTest do
         receive do
           {Membrane.Testing.Pipeline, ^pid,
            {:handle_child_notification, {{:buffer, buffer}, :sink}}} ->
-            cues =
-              buffer.payload
-              |> Subtitle.WebVTT.unmarshal!()
-              |> get_in([Access.key!(:cues)])
-              |> Enum.map(&normalize_cue_timestamps/1)
-
-            x = %{
-              from: Membrane.Time.as_seconds(buffer.pts, :round),
-              to: Membrane.Time.as_seconds(buffer.metadata.to, :round),
-              cues: cues
-            }
-
-            {[x], pid}
+            {[buffer], pid}
 
           {Membrane.Testing.Pipeline, ^pid, {:handle_element_end_of_stream, {:sink, :input}}} ->
             {:halt, pid}

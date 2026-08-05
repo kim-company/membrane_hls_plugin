@@ -4,7 +4,7 @@ defmodule Membrane.HLS.MixProject do
   def project do
     [
       app: :membrane_hls_plugin,
-      version: "3.0.10",
+      version: "3.0.11",
       elixir: "~> 1.13",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -34,7 +34,7 @@ defmodule Membrane.HLS.MixProject do
       {:membrane_aac_plugin, "~> 0.18"},
       {:membrane_h26x_plugin, "~> 0.10"},
       {:membrane_text_format, "~> 1.0"},
-      {:membrane_webvtt_plugin, "~> 3.0"},
+      {:membrane_webvtt_plugin, "~> 3.0.2"},
       {:membrane_mpeg_ts_plugin, "~> 2.0"},
       {:membrane_flv_plugin, "~> 0.13", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},

@@ -77,8 +77,15 @@ defmodule Membrane.HLS.WebVTT.Aggregator do
   end
 
   defp buffer_to_cue(buffer) do
+    text =
+      if buffer.metadata[:text_layout] == :verbatim do
+        buffer.payload
+      else
+        String.trim(buffer.payload)
+      end
+
     %Subtitle.Cue{
-      text: String.trim(buffer.payload),
+      text: text,
       from: Time.as_milliseconds(buffer.pts, :round),
       to: Time.as_milliseconds(buffer.metadata.to, :round)
     }

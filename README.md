@@ -25,6 +25,11 @@ Adaptive live streaming plugin (HLS) for the Membrane Framework, used in product
   - AAC audio encoding  
   - Text subtitles (WebVTT format)
 
+- **Subtitle Text Layout**:
+  - Unmarked text buffers use automatic WebVTT cue formatting
+  - Text buffers marked with `metadata: %{text_layout: :verbatim}` retain their payload exactly
+  - Verbatim callers are responsible for providing valid WebVTT cue text
+
 - **Operating Modes** (via `playlist_mode`):
   - `:vod` - segments are synced as soon as the next segment group is ready
   - `{:event, safety_delay}` - live event playlists synced on a target-duration cadence
