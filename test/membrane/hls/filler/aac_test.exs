@@ -81,6 +81,7 @@ defmodule Membrane.HLS.Filler.AACTest do
 
     pipeline = Testing.Pipeline.start_link_supervised!(spec: spec)
 
+    assert_sink_playing(pipeline, :sink)
     Testing.Pipeline.notify_child(pipeline, :filler, {:time_reference, 0})
 
     pipeline

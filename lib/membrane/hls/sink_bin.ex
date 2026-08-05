@@ -463,15 +463,11 @@ defmodule Membrane.HLS.SinkBin do
         state
 
       sync_state ->
-        if live_mode?(state.mode) do
-          if sync_state.timer_ref do
-            Process.cancel_timer(sync_state.timer_ref)
-          end
-
-          update_state_sync_state(state, %{sync_state | stop: true, timer_ref: nil})
-        else
-          state
+        if sync_state.timer_ref do
+          Process.cancel_timer(sync_state.timer_ref)
         end
+
+        update_state_sync_state(state, %{sync_state | stop: true, timer_ref: nil})
     end
   end
 

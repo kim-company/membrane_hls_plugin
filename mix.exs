@@ -5,7 +5,7 @@ defmodule Membrane.HLS.MixProject do
     [
       app: :membrane_hls_plugin,
       version: "3.0.11",
-      elixir: "~> 1.13",
+      elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       source_url: "https://github.com/kim-company/membrane_hls_plugin",
@@ -30,7 +30,9 @@ defmodule Membrane.HLS.MixProject do
       {:kim_hls, "~> 3.0"},
       {:membrane_core, "~> 1.0"},
       {:membrane_file_plugin, "~> 0.17"},
-      {:membrane_mp4_plugin, "~> 0.35"},
+      {:membrane_mp4_plugin, "~> 0.36.7"},
+      # 0.3.1 accidentally includes Credo as a production dependency.
+      {:membrane_opus_format, "== 0.3.0"},
       {:membrane_aac_plugin, "~> 0.18"},
       {:membrane_h26x_plugin, "~> 0.10"},
       {:membrane_text_format, "~> 1.0"},

@@ -36,7 +36,14 @@ defmodule Membrane.HLS.Filler.AAC do
 
   @impl true
   def handle_buffer(:input, buffer, _ctx, %{time_reference: nil} = state) do
-    state = update_in(state, [:queue], fn q -> :queue.in(buffer, q) end)
+    state =
+      state
+      |> update_in([:queue], fn q -> :queue.in(buffer, q) end)
+      |> Map.update!(:time_first_buffer, fn
+        nil -> Membrane.Buffer.get_dts_or_pts(buffer)
+        time_first_buffer -> time_first_buffer
+      end)
+
     {[], state}
   end
 
